@@ -11,9 +11,9 @@ from google import genai
 
 load_dotenv()
 
-api_key = os.getenv("GEMINI_API_KEY")
+API_KEY = os.getenv("GEMINI_API_KEY")
 
-if not api_key:
+if not API_KEY:
     raise ValueError(
         "GEMINI_API_KEY was not found in .env"
     )
@@ -24,205 +24,299 @@ if not api_key:
 # ============================================================
 
 client = genai.Client(
-    api_key=api_key
+    api_key=API_KEY
 )
 
 
-MODEL = "gemini-3.1-flash-lite"
+MODEL_NAME = "gemini-2.0-flash"
 
 
 # ============================================================
-# GEMINI PLANNER
+# ANALYSIS PLANNER
 # ============================================================
 
 def choose_analysis(
     question,
     profile
 ):
-    """
-    Ask Gemini to determine which analysis
-    operation should be performed.
-    """
 
     prompt = f"""
-You are the planning component of an AI Data Analyst.
+You are the planning engine for an AI Data Analyst.
 
-The user has uploaded a dataset.
+Your job is NOT to calculate the answer.
 
-DATASET PROFILE:
-
-{json.dumps(
-    profile,
-    indent=2,
-    default=str
-)}
+Your job is to determine which Python analysis operation
+should be executed on the dataset.
 
 USER QUESTION:
-
 {question}
+
+DATASET PROFILE:
+{json.dumps(profile, default=str, indent=2)}
 
 AVAILABLE OPERATIONS:
 
 1. calculate_sum
-2. calculate_average
-3. calculate_count
-4. calculate_min
-5. calculate_max
-6. group_and_sum
 
-Choose exactly ONE operation.
+Use for:
+- total
+- sum
+- total revenue
+- total sales
 
-Return ONLY valid JSON.
-
-For calculate_sum:
-
+JSON:
 {{
     "operation": "calculate_sum",
-    "column": "column_name"
+    "column": "Revenue"
 }}
 
-For calculate_average:
 
+2. calculate_average
+
+Use for:
+- average
+- mean
+- average price
+- average revenue
+
+JSON:
 {{
     "operation": "calculate_average",
-    "column": "column_name"
+    "column": "Selling_Price"
 }}
 
-For calculate_count:
 
+3. calculate_count
+
+Use for:
+- number of rows
+- number of transactions
+- count
+
+JSON:
 {{
     "operation": "calculate_count",
-    "column": "column_name"
+    "column": "Invoice_ID"
 }}
 
-For calculate_min:
 
+4. calculate_min
+
+Use for:
+- minimum
+- lowest
+- smallest
+
+JSON:
 {{
     "operation": "calculate_min",
-    "column": "column_name"
+    "column": "Revenue"
 }}
 
-For calculate_max:
 
+5. calculate_max
+
+Use for:
+- maximum
+- highest
+- largest
+
+JSON:
 {{
     "operation": "calculate_max",
-    "column": "column_name"
+    "column": "Revenue"
 }}
 
-For group_and_sum:
 
+6. group_and_sum
+
+Use for:
+- revenue by city
+- sales by category
+- total revenue for each brand
+- compare revenue across groups
+
+JSON:
 {{
     "operation": "group_and_sum",
-    "group_column": "column_name",
-    "value_column": "column_name"
+    "group_column": "City",
+    "value_column": "Revenue"
 }}
 
-RULES:
 
-- Use ONLY columns that exist in the dataset.
-- Never invent column names.
-- Return JSON only.
-- Do not use markdown.
-- Do not explain your answer.
+7. top_n
+
+Use for:
+- top 5 cities
+- top 10 brands
+- best performing categories
+- highest revenue cities
+- highest selling brands
+
+JSON:
+{{
+    "operation": "top_n",
+    "group_column": "City",
+    "value_column": "Revenue",
+    "n": 5
+}}
+
+
+8. group_and_average
+
+Use for:
+- average revenue by city
+- average selling price by brand
+- average cost by category
+
+JSON:
+{{
+    "operation": "group_and_average",
+    "group_column": "City",
+    "value_column": "Revenue"
+}}
+
+
+9. percentage_of_total
+
+Use for:
+- percentage of revenue by city
+- revenue contribution by brand
+- percentage of sales by category
+
+JSON:
+{{
+    "operation": "percentage_of_total",
+    "group_column": "City",
+    "value_column": "Revenue"
+}}
+
+
+10. filter_and_sum
+
+Use when the user asks for the total of a numeric column
+for a specific category/value.
+
+Example:
+"What is the revenue in Delhi?"
+
+JSON:
+{{
+    "operation": "filter_and_sum",
+    "filter_column": "City",
+    "filter_value": "Delhi",
+    "value_column": "Revenue"
+}}
+
+
+11. monthly_sum
+
+Use for:
+- monthly revenue
+- revenue trend by month
+- sales by month
+- monthly sales trend
+
+JSON:
+{{
+    "operation": "monthly_sum",
+    "date_column": "Invoice_Date",
+    "value_column": "Revenue"
+}}
+
+
+IMPORTANT RULES:
+
+1. Use ONLY columns that exist in the dataset profile.
+2. Do NOT invent column names.
+3. Return ONLY valid JSON.
+4. Do NOT use markdown.
+5. Do NOT calculate the result yourself.
+6. For "top N", identify the requested number.
+7. If the user says "top 5", n must be 5.
+8. If the user says "top 10", n must be 10.
+9. Default n to 10 when no number is specified.
+
+Return ONLY the JSON analysis plan.
 """
 
     response = client.models.generate_content(
-        model=MODEL,
+        model=MODEL_NAME,
         contents=prompt
     )
 
     text = response.text.strip() # pyright: ignore[reportOptionalMemberAccess]
 
-    # Remove accidental markdown fences
+    # Remove markdown fences if Gemini adds them
     if text.startswith("```"):
         text = text.replace(
             "```json",
             ""
-        )
-
-        text = text.replace(
+        ).replace(
             "```",
             ""
-        )
-
-        text = text.strip()
+        ).strip()
 
     try:
-
-        plan = json.loads(text)
+        return json.loads(text)
 
     except json.JSONDecodeError as e:
 
         raise ValueError(
-            f"Gemini returned invalid JSON:\n{text}"
+            f"Gemini returned invalid JSON: {text}"
         ) from e
-
-    return plan
 
 
 # ============================================================
-# GEMINI EXPLANATION
+# RESULT EXPLANATION
 # ============================================================
 
 def explain_result(
     question,
-    operation,
+    plan,
     result
 ):
-    """
-    Ask Gemini to explain the actual Python result.
-    """
 
     if hasattr(result, "to_dict"):
-
         result_for_ai = result.to_dict(
             orient="records"
         )
-
     else:
-
         result_for_ai = result
-
 
     prompt = f"""
 You are an AI Data Analyst.
 
-USER QUESTION:
+Answer the user's question using ONLY the
+actual Python result provided below.
 
+USER QUESTION:
 {question}
 
-ANALYSIS PERFORMED:
+ANALYSIS PLAN:
+{json.dumps(plan, default=str)}
 
-{json.dumps(
-    operation,
-    indent=2,
-    default=str
-)}
+ACTUAL PYTHON RESULT:
+{json.dumps(result_for_ai, default=str)}
 
-ACTUAL RESULT FROM PYTHON:
+Rules:
 
-{json.dumps(
-    result_for_ai,
-    indent=2,
-    default=str
-)}
+1. Do not invent numbers.
+2. Do not change the Python result.
+3. Explain the result clearly.
+4. Use commas for large numbers.
+5. Use 2 decimal places for monetary/numeric values
+   when appropriate.
+6. If the result is a table, summarize the important findings.
+7. If it is a top-N result, rank the items clearly.
+8. Keep the answer concise but useful.
+9. Mention the relevant column names when useful.
 
-Explain the result clearly.
-
-RULES:
-
-- Use ONLY the actual result provided.
-- Do not invent numbers.
-- Do not change numbers.
-- Do not perform a different calculation.
-- Mention the relevant column or columns.
-- Use simple business language.
-- If the result is a table, identify the most important finding.
-- Keep the response concise.
+Return a natural-language answer.
 """
 
     response = client.models.generate_content(
-        model=MODEL,
+        model=MODEL_NAME,
         contents=prompt
     )
 

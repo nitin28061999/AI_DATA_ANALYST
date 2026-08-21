@@ -47,7 +47,7 @@ def calculate_average(df, column):
 def calculate_count(df, column=None):
 
     if column is None:
-        return int(len(df))
+        return len(df)
 
     validate_column(df, column)
 
@@ -90,20 +90,12 @@ def group_and_sum(
         errors="coerce"
     )
 
-    result = (
-        temp_df
-        .groupby(
-            group_column,
-            dropna=False
-        )[value_column]
+    return (
+        temp_df.groupby(group_column, dropna=False)[value_column]
         .sum()
-        .sort_values(
-            ascending=False
-        )
+        .sort_values(ascending=False)
         .reset_index()
     )
-
-    return result
 
 
 # ============================================================
@@ -136,21 +128,13 @@ def top_n(
         errors="coerce"
     )
 
-    result = (
-        temp_df
-        .groupby(
-            group_column,
-            dropna=False
-        )[value_column]
+    return (
+        temp_df.groupby(group_column, dropna=False)[value_column]
         .sum()
-        .sort_values(
-            ascending=False
-        )
+        .sort_values(ascending=False)
         .head(n)
         .reset_index()
     )
-
-    return result
 
 
 # ============================================================
@@ -175,20 +159,12 @@ def group_and_average(
         errors="coerce"
     )
 
-    result = (
-        temp_df
-        .groupby(
-            group_column,
-            dropna=False
-        )[value_column]
+    return (
+        temp_df.groupby(group_column, dropna=False)[value_column]
         .mean()
-        .sort_values(
-            ascending=False
-        )
+        .sort_values(ascending=False)
         .reset_index()
     )
-
-    return result
 
 
 # ============================================================
@@ -311,11 +287,4 @@ def monthly_sum(
         .astype(str)
     )
 
-    result = (
-        temp_df
-        .groupby("Month")[value_column]
-        .sum()
-        .reset_index()
-    )
-
-    return result
+    return temp_df.groupby("Month")[value_column].sum().reset_index()
