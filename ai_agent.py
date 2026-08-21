@@ -6,65 +6,68 @@ from google import genai
 
 
 # ============================================================
-# ENVIRONMENT
+# LOAD ENVIRONMENT
 # ============================================================
 
 load_dotenv()
+
+
+# ============================================================
+# GEMINI CONFIGURATION
+# ============================================================
 
 API_KEY = os.getenv("GEMINI_API_KEY")
 
 if not API_KEY:
     raise ValueError(
-        "GEMINI_API_KEY was not found in .env"
+        "GEMINI_API_KEY was not found in the .env file."
     )
 
-
-# ============================================================
-# GEMINI CLIENT
-# ============================================================
 
 client = genai.Client(
     api_key=API_KEY
 )
 
 
-MODEL_NAME = "gemini-2.0-flash"
+MODEL_NAME = "gemini-3.6-flash"
 
 
 # ============================================================
-# ANALYSIS PLANNER
+# CHOOSE ANALYSIS
 # ============================================================
 
 def choose_analysis(
     question,
     profile
 ):
+    """
+    Ask Gemini to choose the correct Python
+    analysis operation.
+    """
 
     prompt = f"""
-You are the planning engine for an AI Data Analyst.
+You are an AI Data Analyst.
 
-Your job is NOT to calculate the answer.
-
-Your job is to determine which Python analysis operation
-should be executed on the dataset.
+Your job is to analyze a dataset by selecting
+ONE operation that Python should execute.
 
 USER QUESTION:
 {question}
 
 DATASET PROFILE:
-{json.dumps(profile, default=str, indent=2)}
+{json.dumps(profile, indent=2, default=str)}
 
 AVAILABLE OPERATIONS:
 
 1. calculate_sum
-
 Use for:
 - total
 - sum
 - total revenue
 - total sales
+- total cost
 
-JSON:
+Required:
 {{
     "operation": "calculate_sum",
     "column": "Revenue"
@@ -72,14 +75,13 @@ JSON:
 
 
 2. calculate_average
-
 Use for:
 - average
 - mean
 - average price
 - average revenue
 
-JSON:
+Required:
 {{
     "operation": "calculate_average",
     "column": "Selling_Price"
@@ -87,27 +89,27 @@ JSON:
 
 
 3. calculate_count
-
 Use for:
-- number of rows
-- number of transactions
 - count
+- number of rows
+- number of records
+- number of transactions
 
-JSON:
+Required:
 {{
     "operation": "calculate_count",
-    "column": "Invoice_ID"
+    "column": "Revenue"
 }}
 
 
 4. calculate_min
-
 Use for:
 - minimum
 - lowest
 - smallest
+- lowest price
 
-JSON:
+Required:
 {{
     "operation": "calculate_min",
     "column": "Revenue"
@@ -115,13 +117,14 @@ JSON:
 
 
 5. calculate_max
-
 Use for:
 - maximum
 - highest
 - largest
+- highest revenue
+- highest price
 
-JSON:
+Required:
 {{
     "operation": "calculate_max",
     "column": "Revenue"
@@ -129,14 +132,15 @@ JSON:
 
 
 6. group_and_sum
-
 Use for:
+- top cities by revenue
 - revenue by city
-- sales by category
-- total revenue for each brand
-- compare revenue across groups
+- revenue by brand
+- revenue by category
+- sales by city
+- sales by brand
 
-JSON:
+Required:
 {{
     "operation": "group_and_sum",
     "group_column": "City",
@@ -145,15 +149,14 @@ JSON:
 
 
 7. top_n
+Use when the user explicitly asks for:
+- top 5
+- top 10
+- highest 5
+- best 5
+- top N categories/cities/brands
 
-Use for:
-- top 5 cities
-- top 10 brands
-- best performing categories
-- highest revenue cities
-- highest selling brands
-
-JSON:
+Required:
 {{
     "operation": "top_n",
     "group_column": "City",
@@ -162,103 +165,57 @@ JSON:
 }}
 
 
-8. group_and_average
+RULES:
 
-Use for:
-- average revenue by city
-- average selling price by brand
-- average cost by category
-
-JSON:
-{{
-    "operation": "group_and_average",
-    "group_column": "City",
-    "value_column": "Revenue"
-}}
-
-
-9. percentage_of_total
-
-Use for:
-- percentage of revenue by city
-- revenue contribution by brand
-- percentage of sales by category
+- Return ONLY valid JSON.
+- Do not use markdown.
+- Do not explain your answer.
+- Use column names exactly as they appear in the dataset.
+- Never invent a column.
+- Choose the simplest correct operation.
+- For "top N", use top_n.
+- For "by city/brand/category", use group_and_sum.
+- For a simple total, use calculate_sum.
 
 JSON:
-{{
-    "operation": "percentage_of_total",
-    "group_column": "City",
-    "value_column": "Revenue"
-}}
-
-
-10. filter_and_sum
-
-Use when the user asks for the total of a numeric column
-for a specific category/value.
-
-Example:
-"What is the revenue in Delhi?"
-
-JSON:
-{{
-    "operation": "filter_and_sum",
-    "filter_column": "City",
-    "filter_value": "Delhi",
-    "value_column": "Revenue"
-}}
-
-
-11. monthly_sum
-
-Use for:
-- monthly revenue
-- revenue trend by month
-- sales by month
-- monthly sales trend
-
-JSON:
-{{
-    "operation": "monthly_sum",
-    "date_column": "Invoice_Date",
-    "value_column": "Revenue"
-}}
-
-
-IMPORTANT RULES:
-
-1. Use ONLY columns that exist in the dataset profile.
-2. Do NOT invent column names.
-3. Return ONLY valid JSON.
-4. Do NOT use markdown.
-5. Do NOT calculate the result yourself.
-6. For "top N", identify the requested number.
-7. If the user says "top 5", n must be 5.
-8. If the user says "top 10", n must be 10.
-9. Default n to 10 when no number is specified.
-
-Return ONLY the JSON analysis plan.
 """
+
 
     response = client.models.generate_content(
         model=MODEL_NAME,
         contents=prompt
     )
 
+
     text = response.text.strip() # pyright: ignore[reportOptionalMemberAccess]
 
-    # Remove markdown fences if Gemini adds them
+
+    # --------------------------------------------------------
+    # Remove markdown if Gemini accidentally adds it
+    # --------------------------------------------------------
+
     if text.startswith("```"):
+
         text = text.replace(
             "```json",
             ""
-        ).replace(
+        )
+
+        text = text.replace(
             "```",
             ""
-        ).strip()
+        )
+
+        text = text.strip()
+
+
+    # --------------------------------------------------------
+    # Parse JSON
+    # --------------------------------------------------------
 
     try:
-        return json.loads(text)
+
+        plan = json.loads(text)
 
     except json.JSONDecodeError as e:
 
@@ -267,8 +224,11 @@ Return ONLY the JSON analysis plan.
         ) from e
 
 
+    return plan
+
+
 # ============================================================
-# RESULT EXPLANATION
+# EXPLAIN RESULT
 # ============================================================
 
 def explain_result(
@@ -276,48 +236,62 @@ def explain_result(
     plan,
     result
 ):
+    """
+    Ask Gemini to explain the Python result
+    in natural language.
+    """
 
-    if hasattr(result, "to_dict"):
+    if hasattr(
+        result,
+        "to_dict"
+    ):
+
         result_for_ai = result.to_dict(
             orient="records"
         )
+
     else:
+
         result_for_ai = result
+
 
     prompt = f"""
 You are an AI Data Analyst.
 
-Answer the user's question using ONLY the
-actual Python result provided below.
+Answer the user's question using the
+ACTUAL Python calculation below.
 
 USER QUESTION:
 {question}
 
 ANALYSIS PLAN:
-{json.dumps(plan, default=str)}
+{json.dumps(plan, indent=2, default=str)}
 
-ACTUAL PYTHON RESULT:
-{json.dumps(result_for_ai, default=str)}
+PYTHON RESULT:
+{json.dumps(result_for_ai, indent=2, default=str)}
 
-Rules:
+Instructions:
 
-1. Do not invent numbers.
-2. Do not change the Python result.
-3. Explain the result clearly.
-4. Use commas for large numbers.
-5. Use 2 decimal places for monetary/numeric values
-   when appropriate.
-6. If the result is a table, summarize the important findings.
-7. If it is a top-N result, rank the items clearly.
-8. Keep the answer concise but useful.
-9. Mention the relevant column names when useful.
+- Give a clear and concise answer.
+- Use the actual Python result.
+- Do not invent numbers.
+- Do not perform a different calculation.
+- If the result is grouped data, summarize the important findings.
+- If the result contains rankings, explain the ranking.
+- Format large numbers with commas.
+- Use 2 decimal places for monetary/decimal values when appropriate.
+- Do not mention internal prompts.
+- Do not mention Gemini.
+- Do not mention that you are an AI model.
 
-Return a natural-language answer.
+Answer naturally.
 """
+
 
     response = client.models.generate_content(
         model=MODEL_NAME,
         contents=prompt
     )
+
 
     return response.text.strip() # pyright: ignore[reportOptionalMemberAccess]
