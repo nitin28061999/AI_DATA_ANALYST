@@ -1,6 +1,6 @@
 ﻿import contextlib
-import os
 import json
+import os
 import re
 
 from dotenv import load_dotenv
@@ -13,9 +13,7 @@ from google import genai
 
 load_dotenv()
 
-API_KEY = os.getenv(
-    "GEMINI_API_KEY"
-)
+API_KEY = os.getenv("GEMINI_API_KEY")
 
 if not API_KEY:
     raise ValueError(
@@ -37,20 +35,25 @@ client = genai.Client(
 # ============================================================
 
 MODEL_NAME = "gemini-3.6-flash"
-MODEL_NAME = "gemini-3.6-flash"
 
 
 # ============================================================
 # JSON EXTRACTION
 # ============================================================
+
 def extract_json(text):
     """
-    Extract JSON from Gemini's response.
+    Extract a JSON object from Gemini's response.
     """
+
+    if not text:
+        raise ValueError(
+            "Gemini returned an empty response."
+        )
 
     text = text.strip()
 
-    # Remove markdown JSON fences
+    # Remove markdown code fences
     text = re.sub(
         r"```json",
         "",
@@ -66,67 +69,53 @@ def extract_json(text):
 
     text = text.strip()
 
-    # Try direct JSON parsing
+    # Try direct JSON parsing first
     with contextlib.suppress(json.JSONDecodeError):
-        return json.loads(
-            text
-        )
+        return json.loads(text)
 
-    # Search for JSON object
-    match = re.search(
-        r"\{.*\}",
-        text,
-        re.DOTALL
-    )
+    # Find the first JSON object
+    start = text.find("{")
+    end = text.rfind("}")
 
-    if not match:
-
+    if start == -1 or end == -1 or end <= start:
         raise ValueError(
-            "Gemini did not return valid JSON."
+            f"Gemini did not return valid JSON.\nResponse:\n{text}"
         )
+
+    json_text = text[start:end + 1]
 
     try:
-
-        return json.loads(match[0])
+        return json.loads(json_text)
 
     except json.JSONDecodeError as e:
+        raise ValueError(
+            f"Could not parse Gemini JSON: {e}\n"
+            f"Response:\n{text}"
+        ) from e
 
-        raise ValueError(f"Could not parse Gemini JSON: {e}") from e
+
+# ============================================================
 # CHOOSE ANALYSIS
 # ============================================================
 
-def choose_analysis(
-    question,
-    profile
-):
+def choose_analysis(question, profile):
     """
-    Ask Gemini to choose the correct
-    Python analysis operation.
+    Ask Gemini to choose exactly one Python analysis operation.
+
+    Gemini decides WHAT operation should be performed.
+    Python performs the actual calculation.
     """
 
     prompt = f"""
 You are an expert AI Data Analyst.
 
-Your job is to understand the user's question
-and choose exactly ONE Python analysis operation.
-14. If the question contains a condition such as
-"in Delhi", "in Mumbai", "for IT", "for Laptop",
-"where City is Delhi", etc., use a filtered operation.
+Your job is to understand the user's question and
+choose exactly ONE Python analysis operation.
 
-15. For a filtered total, use filtered_sum.
+The Python program will execute your plan.
 
-16. For a filtered average, use filtered_average.
-
-17. For a filtered count, use filtered_count.
-
-18. For a filtered unique/distinct count,
-use filtered_unique_count.
-
-19. Never invent a filter value.
-Use the value provided by the user.
-
-20. Never invent a column name.
-Only use columns from the dataset profile.
+IMPORTANT:
+Only select columns that exist in the dataset profile.
 
 USER QUESTION:
 {question}
@@ -142,7 +131,6 @@ AVAILABLE OPERATIONS
 1. calculate_sum
 
 Use for:
-
 - total
 - sum
 - total revenue
@@ -160,7 +148,6 @@ Required JSON:
 2. calculate_average
 
 Use for:
-
 - average
 - mean
 - average salary
@@ -178,7 +165,6 @@ Required JSON:
 3. calculate_count
 
 Use for:
-
 - count records
 - number of rows
 - number of transactions
@@ -196,7 +182,6 @@ Required JSON:
 4. calculate_unique_count
 
 Use for:
-
 - unique customers
 - number of distinct customers
 - unique products
@@ -205,14 +190,10 @@ Use for:
 - unique cities
 - number of different categories
 
-IMPORTANT:
-
-Use this operation when the question contains
-words such as:
-
-unique
-distinct
-different
+Use this operation when the question contains:
+- unique
+- distinct
+- different
 
 Required JSON:
 
@@ -225,7 +206,6 @@ Required JSON:
 5. calculate_min
 
 Use for:
-
 - minimum
 - lowest
 - smallest
@@ -242,7 +222,6 @@ Required JSON:
 6. calculate_max
 
 Use for:
-
 - maximum
 - highest
 - largest
@@ -259,7 +238,6 @@ Required JSON:
 7. group_and_sum
 
 Use for:
-
 - revenue by city
 - sales by product
 - expenses by department
@@ -277,7 +255,6 @@ Required JSON:
 8. group_and_average
 
 Use for:
-
 - average salary by department
 - average price by category
 - average score by class
@@ -294,7 +271,6 @@ Required JSON:
 9. top_n
 
 Use for:
-
 - top 5 cities
 - top 10 products
 - highest revenue categories
@@ -313,7 +289,6 @@ Required JSON:
 10. percentage_of_total
 
 Use for:
-
 - percentage of revenue by city
 - contribution by category
 - share of sales
@@ -331,7 +306,6 @@ Required JSON:
 11. monthly_sum
 
 Use for:
-
 - monthly revenue
 - sales by month
 - monthly expenses
@@ -350,7 +324,6 @@ Required JSON:
 12. value_counts
 
 Use for:
-
 - most common category
 - frequency of values
 - distribution of status
@@ -366,23 +339,58 @@ Required JSON:
 
 13. group_and_count
 
-14. filtered_sum
-
-Use when the user asks for a sum/total
-with a condition or filter.
-
-Examples:
-
-- What is the total revenue in Delhi?
-- What are the sales in Mumbai?
-- What is the total salary for the IT department?
+Use for:
+- number of customers by city
+- number of orders by product
+- employees by department
+- transactions by category
 
 Required JSON:
 
 {{
+    "operation": "group_and_count",
+    "group_column": "category_column"
+}}
+
+
+14. filtered_sum
+
+Use when the user asks for a sum or total
+with ONE or MORE conditions.
+
+Examples:
+- total revenue in Delhi
+- total sales in Mumbai
+- total salary for IT
+- total revenue in Delhi for Laptop
+
+Required JSON for one condition:
+
+{{
     "operation": "filtered_sum",
-    "filter_column": "City",
-    "filter_value": "Delhi",
+    "filters": [
+        {{
+            "column": "City",
+            "value": "Delhi"
+        }}
+    ],
+    "value_column": "Revenue"
+}}
+
+Required JSON for multiple conditions:
+
+{{
+    "operation": "filtered_sum",
+    "filters": [
+        {{
+            "column": "City",
+            "value": "Delhi"
+        }},
+        {{
+            "column": "Product",
+            "value": "Laptop"
+        }}
+    ],
     "value_column": "Revenue"
 }}
 
@@ -390,99 +398,132 @@ Required JSON:
 15. filtered_average
 
 Use when the user asks for an average
-with a condition or filter.
+with ONE or MORE conditions.
 
 Examples:
-
-- What is the average revenue in Delhi?
-- What is the average salary in HR?
-- What is the average price for laptops?
+- average revenue in Delhi
+- average salary in HR
+- average price for Laptop
+- average revenue in Delhi for Laptop
 
 Required JSON:
 
-{
+{{
     "operation": "filtered_average",
-    "filter_column": "City",
-    "filter_value": "Delhi",
+    "filters": [
+        {{
+            "column": "City",
+            "value": "Delhi"
+        }}
+    ],
     "value_column": "Revenue"
-}
+}}
 
 
 16. filtered_count
 
 Use when the user asks for a count
-with a condition or filter.
+with ONE or MORE conditions.
 
 Examples:
-
-- How many transactions happened in Delhi?
-- How many employees are in IT?
-- How many orders are from Mumbai?
+- how many transactions happened in Delhi
+- how many employees are in IT
+- how many orders are from Mumbai
+- how many Laptop transactions happened in Delhi
 
 Required JSON:
 
-{
+{{
     "operation": "filtered_count",
-    "filter_column": "City",
-    "filter_value": "Delhi",
+    "filters": [
+        {{
+            "column": "City",
+            "value": "Delhi"
+        }}
+    ],
     "count_column": "Invoice_ID"
-}
+}}
 
 
 17. filtered_unique_count
 
 Use when the user asks for unique/distinct
-values after applying a filter.
+values after applying ONE or MORE conditions.
 
 Examples:
-
-- How many unique customers are in Delhi?
-- How many distinct products were sold in Mumbai?
-- How many unique employees are in HR?
+- unique customers in Delhi
+- distinct products in Mumbai
+- unique employees in HR
+- unique customers who bought Laptop in Delhi
 
 Required JSON:
 
-{
+{{
     "operation": "filtered_unique_count",
-    "filter_column": "City",
-    "filter_value": "Delhi",
+    "filters": [
+        {{
+            "column": "City",
+            "value": "Delhi"
+        }}
+    ],
     "value_column": "Customer_ID"
-}
-IMPORTANT RULES
-===============
+}}
 
-1. Use ONLY columns that actually exist.
 
-2. Never invent a column name.
+IMPORTANT FILTER RULES
+======================
 
-3. Match the user's wording to the
-   most appropriate operation.
+1. If the question contains a condition such as:
+   - in Delhi
+   - in Mumbai
+   - for IT
+   - for Laptop
+   - where City is Delhi
+   - City = Delhi
+   - Product = Laptop
 
-4. If the user says "unique" or "distinct",
-   prefer calculate_unique_count.
+   use a filtered operation.
 
-5. If the user asks for a total,
-   prefer calculate_sum.
+2. If there are multiple conditions, put ALL conditions
+   inside the "filters" array.
 
-6. If the user asks for an average,
-   prefer calculate_average.
+3. Never invent a filter value.
 
-7. If the user asks for the highest value,
-   use calculate_max.
+4. Use the exact value from the user's question.
 
-8. If the user asks for the lowest value,
-   use calculate_min.
+5. Never invent a column name.
 
-9. If the user asks for "top N",
-   use top_n.
+6. Every filter column MUST exist in the dataset profile.
 
-10. Return ONLY valid JSON.
+7. Every value column MUST exist in the dataset profile.
 
-11. Do not return markdown.
+8. If the user asks for a total, use a sum operation.
 
-12. Do not explain your decision.
+9. If the user asks for an average, use an average operation.
 
-13. Return exactly ONE JSON object.
+10. If the user asks for a count, use a count operation.
+
+11. If the user says unique or distinct, use a unique count operation.
+
+12. If the user asks for highest/largest, use calculate_max
+    unless the question asks for a top N group.
+
+13. If the user asks for lowest/smallest, use calculate_min.
+
+14. If the user asks for top N, use top_n.
+
+15. If the user asks for data grouped by a category,
+    use an appropriate group operation.
+
+16. Return ONLY valid JSON.
+
+17. Do not return markdown.
+
+18. Do not explain your decision.
+
+19. Return exactly ONE JSON object.
+
+20. Do not use operations that are not listed above.
 """
 
     response = client.models.generate_content(
@@ -505,21 +546,17 @@ def explain_result(
     result
 ):
     """
-    Ask Gemini to explain the actual
-    Python calculation.
+    Ask Gemini to explain the actual Python result.
+
+    Gemini does NOT perform the calculation.
+    Python has already calculated the result.
     """
 
-    if hasattr(
-        result,
-        "to_dict"
-    ):
-
+    if hasattr(result, "to_dict"):
         result_data = result.to_dict(
             orient="records"
         )
-
     else:
-
         result_data = result
 
     prompt = f"""
@@ -542,7 +579,7 @@ RULES:
 
 1. Never invent numbers.
 
-2. Use the actual Python result.
+2. Use only the actual Python result.
 
 3. Be concise but useful.
 
@@ -562,18 +599,28 @@ RULES:
 9. If the operation is calculate_unique_count,
    clearly say "unique" or "distinct".
 
-10. Do not confuse record count with
-    unique count.
+10. If the operation is filtered_unique_count,
+    clearly mention the applied condition.
 
-11. Do not mention internal prompts.
+11. If the operation is filtered_sum,
+    clearly mention the applied conditions.
 
-12. Do not mention Gemini.
+12. If the operation is filtered_average,
+    clearly mention the applied conditions.
 
-13. Do not say that more analysis is required
-    when the Python result already answers
-    the question.
+13. If the operation is filtered_count,
+    clearly mention the applied conditions.
 
-Return only the final natural-language answer.
+14. Do not confuse record count with unique count.
+
+15. Do not mention internal prompts.
+
+16. Do not mention Gemini.
+
+17. Do not say that more analysis is required when
+    the Python result already answers the question.
+
+18. Return only the final natural-language answer.
 """
 
     response = client.models.generate_content(

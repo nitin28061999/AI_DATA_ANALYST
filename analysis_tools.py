@@ -2,93 +2,80 @@ import pandas as pd
 
 
 # ============================================================
-# HELPER FUNCTIONS
+# VALIDATION
 # ============================================================
 
 def validate_column(df, column):
-    """
-    Check whether a column exists in the dataset.
-    """
+    """Validate that a column exists in the dataframe."""
 
     if column not in df.columns:
         raise ValueError(
-            f"Column '{column}' does not exist. "
-            f"Available columns: {list(df.columns)}"
+            f"Column '{column}' does not exist."
         )
 
 
-def numeric_series(df, column):
-    """
-    Convert a dataframe column to numeric values.
-    Invalid values become NaN.
-    """
+def validate_filters(df, filters):
+    """Validate multi-filter definitions."""
 
-    validate_column(
-        df,
-        column
-    )
+    if not isinstance(filters, list):
+        raise ValueError(
+            "Filters must be provided as a list."
+        )
+
+    if not filters:
+        raise ValueError(
+            "At least one filter is required."
+        )
+
+    for filter_item in filters:
+
+        if not isinstance(filter_item, dict):
+            raise ValueError(
+                "Each filter must be a dictionary."
+            )
+
+        column = filter_item.get("column")
+
+        if not column:
+            raise ValueError(
+                "Each filter must contain a column."
+            )
+
+        validate_column(
+            df,
+            column
+        )
+
+
+# ============================================================
+# BASIC OPERATIONS
+# ============================================================
+
+def calculate_sum(df, column):
+
+    validate_column(df, column)
 
     values = pd.to_numeric(
         df[column],
         errors="coerce"
     )
 
-    if values.notna().sum() == 0:
-        raise ValueError(
-            f"Column '{column}' does not contain numeric values."
-        )
+    return float(values.sum())
 
-    return values
-
-
-# ============================================================
-# SUM
-# ============================================================
-
-def calculate_sum(df, column):
-    """
-    Calculate the total of a numeric column.
-    """
-
-    values = numeric_series(
-        df,
-        column
-    )
-
-    return float(
-        values.sum()
-    )
-
-
-# ============================================================
-# AVERAGE
-# ============================================================
 
 def calculate_average(df, column):
-    """
-    Calculate the average of a numeric column.
-    """
 
-    values = numeric_series(
-        df,
-        column
+    validate_column(df, column)
+
+    values = pd.to_numeric(
+        df[column],
+        errors="coerce"
     )
 
-    return float(
-        values.mean()
-    )
+    return float(values.mean())
 
-
-# ============================================================
-# COUNT
-# ============================================================
 
 def calculate_count(df, column=None):
-    """
-    Count non-null values in a column.
-
-    If column is None, count total rows.
-    """
 
     if column is None:
         return len(df)
@@ -103,26 +90,7 @@ def calculate_count(df, column=None):
     )
 
 
-# ============================================================
-# UNIQUE COUNT
-# ============================================================
-
 def calculate_unique_count(df, column):
-    """
-    Count the number of unique/non-duplicate values
-    in a column.
-
-    Example:
-
-    Customer_ID:
-    101
-    101
-    102
-    103
-
-    Result:
-    3
-    """
 
     validate_column(
         df,
@@ -136,46 +104,38 @@ def calculate_unique_count(df, column):
     )
 
 
-# ============================================================
-# MINIMUM
-# ============================================================
-
 def calculate_min(df, column):
-    """
-    Calculate the minimum value.
-    """
 
-    values = numeric_series(
+    validate_column(
         df,
         column
     )
 
-    return float(
-        values.min()
+    values = pd.to_numeric(
+        df[column],
+        errors="coerce"
     )
 
+    return float(values.min())
 
-# ============================================================
-# MAXIMUM
-# ============================================================
 
 def calculate_max(df, column):
-    """
-    Calculate the maximum value.
-    """
 
-    values = numeric_series(
+    validate_column(
         df,
         column
     )
 
-    return float(
-        values.max()
+    values = pd.to_numeric(
+        df[column],
+        errors="coerce"
     )
+
+    return float(values.max())
 
 
 # ============================================================
-# GROUP + SUM
+# GROUP OPERATIONS
 # ============================================================
 
 def group_and_sum(
@@ -183,76 +143,98 @@ def group_and_sum(
     group_column,
     value_column
 ):
-    """
-    Group data by one column and calculate
-    the sum of another column.
-    """
 
     validate_column(
         df,
         group_column
     )
 
-    values = numeric_series(
+    validate_column(
         df,
         value_column
     )
 
     temp_df = df[
-        [group_column]
+        [group_column, value_column]
     ].copy()
 
-    temp_df[value_column] = values
+    temp_df[value_column] = pd.to_numeric(
+        temp_df[value_column],
+        errors="coerce"
+    )
 
     return (
-        temp_df.groupby(group_column, dropna=False)[value_column]
+        temp_df
+        .groupby(
+            group_column,
+            dropna=False
+        )[value_column]
         .sum()
-        .sort_values(ascending=False)
+        .sort_values(
+            ascending=False
+        )
         .reset_index()
     )
 
-
-# ============================================================
-# GROUP + AVERAGE
-# ============================================================
 
 def group_and_average(
     df,
     group_column,
     value_column
 ):
-    """
-    Group data by one column and calculate
-    the average of another column.
-    """
 
     validate_column(
         df,
         group_column
     )
 
-    values = numeric_series(
+    validate_column(
         df,
         value_column
     )
 
     temp_df = df[
-        [group_column]
+        [group_column, value_column]
     ].copy()
 
-    temp_df[value_column] = values
+    temp_df[value_column] = pd.to_numeric(
+        temp_df[value_column],
+        errors="coerce"
+    )
 
     return (
-        temp_df.groupby(group_column, dropna=False)[value_column]
+        temp_df
+        .groupby(
+            group_column,
+            dropna=False
+        )[value_column]
         .mean()
-        .sort_values(ascending=False)
+        .sort_values(
+            ascending=False
+        )
         .reset_index()
     )
 
 
-# ============================================================
-# TOP N
-# ============================================================
+def group_and_count(
+    df,
+    group_column
+):
+
+    validate_column(
+        df,
+        group_column
+    )
+
+    return (
+        df[group_column]
+        .value_counts(
+            dropna=False
+        )
+        .rename("Count")
+        .reset_index()
+    )
+
 
 def top_n(
     df,
@@ -260,24 +242,43 @@ def top_n(
     value_column,
     n=10
 ):
-    """
-    Return the top N groups based on
-    the sum of a numeric column.
-    """
 
-    result = group_and_sum(
+    validate_column(
         df,
-        group_column,
+        group_column
+    )
+
+    validate_column(
+        df,
         value_column
     )
 
-    return result.head(
-        int(n)
+    temp_df = df[
+        [group_column, value_column]
+    ].copy()
+
+    temp_df[value_column] = pd.to_numeric(
+        temp_df[value_column],
+        errors="coerce"
+    )
+
+    return (
+        temp_df
+        .groupby(
+            group_column,
+            dropna=False
+        )[value_column]
+        .sum()
+        .sort_values(
+            ascending=False
+        )
+        .head(int(n))
+        .reset_index()
     )
 
 
 # ============================================================
-# PERCENTAGE OF TOTAL
+# PERCENTAGE
 # ============================================================
 
 def percentage_of_total(
@@ -285,10 +286,6 @@ def percentage_of_total(
     group_column,
     value_column
 ):
-    """
-    Calculate each group's percentage
-    contribution to the total.
-    """
 
     result = group_and_sum(
         df,
@@ -296,21 +293,13 @@ def percentage_of_total(
         value_column
     )
 
-    total = result[
-        value_column
-    ].sum()
+    total = result[value_column].sum()
 
     if total == 0:
-
-        result[
-            "Percentage"
-        ] = 0.0
+        result["Percentage"] = 0.0
 
     else:
-
-        result[
-            "Percentage"
-        ] = (
+        result["Percentage"] = (
             result[value_column]
             / total
             * 100
@@ -320,7 +309,7 @@ def percentage_of_total(
 
 
 # ============================================================
-# MONTHLY SUM
+# MONTHLY ANALYSIS
 # ============================================================
 
 def monthly_sum(
@@ -328,58 +317,50 @@ def monthly_sum(
     date_column,
     value_column
 ):
-    """
-    Calculate monthly totals.
-
-    Uses 'ME' instead of the deprecated
-    Pandas 'M' frequency.
-    """
 
     validate_column(
         df,
         date_column
     )
 
-    values = numeric_series(
+    validate_column(
         df,
         value_column
     )
 
-    dates = pd.to_datetime(
-        df[date_column],
+    temp_df = df[
+        [date_column, value_column]
+    ].copy()
+
+    temp_df[date_column] = pd.to_datetime(
+        temp_df[date_column],
         errors="coerce"
     )
 
-    temp_df = pd.DataFrame(
-        {
-            "Date": dates,
-            value_column: values,
-        }
+    temp_df[value_column] = pd.to_numeric(
+        temp_df[value_column],
+        errors="coerce"
     )
 
     temp_df = temp_df.dropna(
-        subset=["Date"]
+        subset=[
+            date_column
+        ]
     )
 
     result = (
         temp_df
-        .set_index("Date")
-        .resample("ME")[value_column]
+        .groupby(
+            temp_df[date_column].dt.to_period("M")
+        )[value_column]
         .sum()
         .reset_index()
     )
 
-    result["Month"] = (
-        result["Date"]
-        .dt.strftime("%Y-%m")
+    result[date_column] = (
+        result[date_column]
+        .astype(str)
     )
-
-    result = result[
-        [
-            "Month",
-            value_column,
-        ]
-    ]
 
     return result
 
@@ -392,104 +373,57 @@ def value_counts(
     df,
     column
 ):
-    """
-    Count the frequency of each value
-    in a column.
-    """
 
     validate_column(
         df,
         column
     )
 
-    result = (
+    return (
         df[column]
         .value_counts(
             dropna=False
         )
+        .rename("Count")
         .reset_index()
     )
 
-    result.columns = [
-        column,
-        "Count",
-    ]
-
-    return result
-
 
 # ============================================================
-# GROUP + COUNT
+# MULTI-FILTER ENGINE
 # ============================================================
 
-def group_and_count(
+def apply_filters(
     df,
-    group_column
+    filters
 ):
     """
-    Count records for each group.
-    """
+    Apply multiple AND filters.
 
-    validate_column(
-        df,
-        group_column
-    )
+    Example:
 
-    result = (
-        df[group_column]
-        .value_counts(
-            dropna=False
-        )
-        .reset_index()
-    )
-
-    result.columns = [
-        group_column,
-        "Count",
+    [
+        {"column": "City", "value": "Delhi"},
+        {"column": "Product", "value": "Laptop"}
     ]
-
-    return result
-# ============================================================
-# FILTER DATA
-# ============================================================
-
-def filter_dataframe(
-    df,
-    filter_column,
-    filter_value
-):
-    """
-    Filter dataframe using an exact value match.
     """
 
-    validate_column(
+    validate_filters(
         df,
-        filter_column
+        filters
     )
 
-    # Convert both sides to strings for a flexible
-    # comparison across CSV/Excel datasets.
-    mask = (
-        df[filter_column]
-        .astype(str)
-        .str.strip()
-        .str.lower()
-        ==
-        str(filter_value)
-        .strip()
-        .lower()
-    )
+    filtered_df = df.copy()
 
-    filtered_df = df.loc[
-        mask
-    ].copy()
+    for filter_item in filters:
 
-    if filtered_df.empty:
+        column = filter_item["column"]
+        value = filter_item["value"]
 
-        raise ValueError(
-            f"No rows found where "
-            f"{filter_column} = {filter_value}"
-        )
+        filtered_df = filtered_df[
+            filtered_df[column].astype(str).str.strip().str.lower()
+            == str(value).strip().lower()
+        ]
 
     return filtered_df
 
@@ -500,23 +434,27 @@ def filter_dataframe(
 
 def filtered_sum(
     df,
-    filter_column,
-    filter_value,
+    filters,
     value_column
 ):
-    """
-    Filter the dataset and calculate a sum.
-    """
 
-    filtered_df = filter_dataframe(
+    validate_column(
         df,
-        filter_column,
-        filter_value
+        value_column
     )
 
-    return calculate_sum(
-        filtered_df,
-        value_column
+    filtered_df = apply_filters(
+        df,
+        filters
+    )
+
+    values = pd.to_numeric(
+        filtered_df[value_column],
+        errors="coerce"
+    )
+
+    return float(
+        values.sum()
     )
 
 
@@ -526,23 +464,27 @@ def filtered_sum(
 
 def filtered_average(
     df,
-    filter_column,
-    filter_value,
+    filters,
     value_column
 ):
-    """
-    Filter the dataset and calculate an average.
-    """
 
-    filtered_df = filter_dataframe(
+    validate_column(
         df,
-        filter_column,
-        filter_value
+        value_column
     )
 
-    return calculate_average(
-        filtered_df,
-        value_column
+    filtered_df = apply_filters(
+        df,
+        filters
+    )
+
+    values = pd.to_numeric(
+        filtered_df[value_column],
+        errors="coerce"
+    )
+
+    return float(
+        values.mean()
     )
 
 
@@ -552,23 +494,25 @@ def filtered_average(
 
 def filtered_count(
     df,
-    filter_column,
-    filter_value,
+    filters,
     count_column=None
 ):
-    """
-    Filter the dataset and count rows/non-null values.
-    """
 
-    filtered_df = filter_dataframe(
+    filtered_df = apply_filters(
         df,
-        filter_column,
-        filter_value
+        filters
     )
 
-    return calculate_count(
+    if count_column is None:
+        return len(filtered_df)
+
+    validate_column(
         filtered_df,
         count_column
+    )
+
+    return int(
+        filtered_df[count_column].count()
     )
 
 
@@ -578,22 +522,23 @@ def filtered_count(
 
 def filtered_unique_count(
     df,
-    filter_column,
-    filter_value,
+    filters,
     value_column
 ):
-    """
-    Filter the dataset and calculate the number
-    of unique values.
-    """
 
-    filtered_df = filter_dataframe(
+    validate_column(
         df,
-        filter_column,
-        filter_value
+        value_column
     )
 
-    return calculate_unique_count(
-        filtered_df,
-        value_column
+    filtered_df = apply_filters(
+        df,
+        filters
+    )
+
+    return int(
+        filtered_df[value_column]
+        .nunique(
+            dropna=True
+        )
     )
