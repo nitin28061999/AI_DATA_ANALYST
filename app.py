@@ -80,7 +80,7 @@ if uploaded_file is not None:
 
 
     # ========================================================
-    # SUCCESS MESSAGE
+    # SUCCESS
     # ========================================================
 
     st.success(
@@ -116,9 +116,7 @@ if uploaded_file is not None:
     with col3:
 
         missing_values = int(
-            df.isna()
-            .sum()
-            .sum()
+            df.isna().sum().sum()
         )
 
         st.metric(
@@ -129,8 +127,7 @@ if uploaded_file is not None:
     with col4:
 
         duplicate_rows = int(
-            df.duplicated()
-            .sum()
+            df.duplicated().sum()
         )
 
         st.metric(
@@ -172,17 +169,14 @@ if uploaded_file is not None:
 
                 "Missing Values": [
                     int(
-                        df[column]
-                        .isna()
-                        .sum()
+                        df[column].isna().sum()
                     )
                     for column in df.columns
                 ],
 
                 "Unique Values": [
                     int(
-                        df[column]
-                        .nunique()
+                        df[column].nunique()
                     )
                     for column in df.columns
                 ],
@@ -217,9 +211,33 @@ if uploaded_file is not None:
     question = st.text_input(
         "Your question",
         placeholder=(
-            "Example: What is the total revenue?"
+            "Example: What are the top 5 cities by revenue?"
         ),
     )
+
+
+    # ========================================================
+    # EXAMPLE QUESTIONS
+    # ========================================================
+
+    st.caption(
+        "Try questions like:"
+    )
+
+    example_questions = [
+        "What is the total revenue?",
+        "What are the top 5 cities by revenue?",
+        "Which brand has the highest revenue?",
+        "What is the average selling price?",
+        "What percentage of revenue comes from each city?",
+        "What is the monthly revenue?",
+    ]
+
+    for example in example_questions:
+
+        st.caption(
+            f"• {example}"
+        )
 
 
     # ========================================================
@@ -229,7 +247,7 @@ if uploaded_file is not None:
     if question.strip():
 
         # ----------------------------------------------------
-        # CREATE DATASET PROFILE
+        # PROFILE DATASET
         # ----------------------------------------------------
 
         with st.spinner(
@@ -322,17 +340,25 @@ if uploaded_file is not None:
                 pd.DataFrame
             ):
 
+                display_result = result.copy()
+
                 st.dataframe(
-                    result,
+                    display_result,
                     use_container_width=True
                 )
 
 
                 # =============================================
-                # AUTOMATIC CHART
+                # VISUALIZATION
                 # =============================================
 
                 if len(result.columns) >= 2:
+
+                    st.divider()
+
+                    st.subheader(
+                        "📊 Visualization"
+                    )
 
                     chart_data = result.copy()
 
@@ -344,43 +370,11 @@ if uploaded_file is not None:
                         chart_data.columns[1]
                     )
 
-
-                    # -----------------------------------------
-                    # Convert value column to numeric
-                    # -----------------------------------------
-
-                    chart_data[value_column] = pd.to_numeric(
-                        chart_data[value_column],
-                        errors="coerce"
-                    )
-
-
-                    # -----------------------------------------
-                    # Remove invalid values
-                    # -----------------------------------------
-
-                    chart_data = chart_data.dropna(
-                        subset=[
-                            value_column
-                        ]
-                    )
-
-
-                    # -----------------------------------------
-                    # Set category as index
-                    # -----------------------------------------
-
-                    chart_data = chart_data.set_index(
-                        category_column
-                    )
-
-
-                    # -----------------------------------------
-                    # Show chart
-                    # -----------------------------------------
-
-                    st.write(
-                        "### 📊 Visualization"
+                    chart_data = (
+                        chart_data
+                        .set_index(
+                            category_column
+                        )
                     )
 
                     st.bar_chart(
@@ -390,8 +384,32 @@ if uploaded_file is not None:
                     )
 
 
+                    # =========================================
+                    # PERCENTAGE CHART
+                    # =========================================
+
+                    if "Percentage" in result.columns:
+
+                        percentage_data = (
+                            result
+                            .set_index(
+                                category_column
+                            )
+                        )
+
+                        st.write(
+                            "### 📈 Percentage Distribution"
+                        )
+
+                        st.bar_chart(
+                            percentage_data[
+                                "Percentage"
+                            ]
+                        )
+
+
             # =================================================
-            # FLOAT RESULT
+            # FLOAT
             # =================================================
 
             elif isinstance(
@@ -399,13 +417,14 @@ if uploaded_file is not None:
                 float
             ):
 
-                st.write(
+                st.metric(
+                    "Result",
                     f"{result:,.2f}"
                 )
 
 
             # =================================================
-            # INTEGER RESULT
+            # INTEGER
             # =================================================
 
             elif isinstance(
@@ -413,13 +432,14 @@ if uploaded_file is not None:
                 int
             ):
 
-                st.write(
+                st.metric(
+                    "Result",
                     f"{result:,}"
                 )
 
 
             # =================================================
-            # OTHER RESULT
+            # OTHER
             # =================================================
 
             else:
