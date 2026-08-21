@@ -7,19 +7,25 @@ from analysis_tools import (
     calculate_sum,
     calculate_average,
     calculate_count,
+    calculate_unique_count,
     calculate_min,
     calculate_max,
     group_and_sum,
-    top_n,
     group_and_average,
+    top_n,
     percentage_of_total,
-    filter_and_sum,
     monthly_sum,
+    value_counts,
+    group_and_count,
+    filtered_sum,
+    filtered_average,
+    filtered_count,
+    filtered_unique_count,
 )
 
 
 # ============================================================
-# MAIN ANALYSIS ENGINE
+# RUN ANALYSIS
 # ============================================================
 
 def run_analysis(
@@ -27,10 +33,17 @@ def run_analysis(
     profile,
     question
 ):  # sourcery skip: low-code-quality
+    """
+    Run the complete AI Data Analyst workflow.
+
+    1. Gemini understands the question.
+    2. Gemini chooses an operation.
+    3. Python executes the operation.
+    4. Gemini explains the actual result.
+    """
 
     # ========================================================
-    # STEP 1
-    # GEMINI CREATES PLAN
+    # STEP 1: GEMINI CHOOSES OPERATION
     # ========================================================
 
     plan = choose_analysis(
@@ -39,7 +52,6 @@ def run_analysis(
     )
 
     if not isinstance(plan, dict):
-
         raise ValueError(
             "Gemini returned an invalid analysis plan."
         )
@@ -49,16 +61,17 @@ def run_analysis(
     )
 
     if not operation:
-
         raise ValueError(
             "Gemini did not specify an operation."
         )
 
+    # ========================================================
+    # STEP 2: EXECUTE PYTHON ANALYSIS
+    # ========================================================
 
-    # ========================================================
-    # STEP 2
-    # EXECUTE PYTHON OPERATION
-    # ========================================================
+    # --------------------------------------------------------
+    # SUM
+    # --------------------------------------------------------
 
     if operation == "calculate_sum":
 
@@ -74,7 +87,6 @@ def run_analysis(
             column
         )
 
-
     elif operation == "calculate_average":
 
         column = plan.get("column")
@@ -89,7 +101,6 @@ def run_analysis(
             column
         )
 
-
     elif operation == "calculate_count":
 
         column = plan.get("column")
@@ -99,6 +110,19 @@ def run_analysis(
             column
         )
 
+    elif operation == "calculate_unique_count":
+
+        column = plan.get("column")
+
+        if not column:
+            raise ValueError(
+                "No column specified for unique count."
+            )
+
+        result = calculate_unique_count(
+            df,
+            column
+        )
 
     elif operation == "calculate_min":
 
@@ -114,7 +138,6 @@ def run_analysis(
             column
         )
 
-
     elif operation == "calculate_max":
 
         column = plan.get("column")
@@ -128,7 +151,6 @@ def run_analysis(
             df,
             column
         )
-
 
     elif operation == "group_and_sum":
 
@@ -156,10 +178,6 @@ def run_analysis(
             value_column
         )
 
-
-    elif operation == "top_n":
-
-        result = _extracted_from_run_analysis_138(plan, df)
     elif operation == "group_and_average":
 
         group_column = plan.get(
@@ -186,7 +204,9 @@ def run_analysis(
             value_column
         )
 
+    elif operation == "top_n":
 
+        result = _extracted_from_run_analysis_211(plan, df)
     elif operation == "percentage_of_total":
 
         group_column = plan.get(
@@ -213,10 +233,6 @@ def run_analysis(
             value_column
         )
 
-
-    elif operation == "filter_and_sum":
-
-        result = _extracted_from_run_analysis_225(plan, df)
     elif operation == "monthly_sum":
 
         date_column = plan.get(
@@ -243,17 +259,58 @@ def run_analysis(
             value_column
         )
 
+    elif operation == "value_counts":
 
+        column = plan.get(
+            "column"
+        )
+
+        if not column:
+            raise ValueError(
+                "No column specified."
+            )
+
+        result = value_counts(
+            df,
+            column
+        )
+
+    elif operation == "group_and_count":
+
+        group_column = plan.get(
+            "group_column"
+        )
+
+        if not group_column:
+            raise ValueError(
+                "No group column specified."
+            )
+
+        result = group_and_count(
+            df,
+            group_column
+        )
+
+    elif operation == "filtered_sum":
+
+        result = _extracted_from_run_analysis_351(plan, df)
+    elif operation == "filtered_average":
+
+        result = _extracted_from_run_analysis_391(plan, df)
+    elif operation == "filtered_count":
+
+        result = _extracted_from_run_analysis_272(plan, df)
+    elif operation == "filtered_unique_count":
+
+        result = _extracted_from_run_analysis_303(plan, df)
     else:
 
         raise ValueError(
             f"Unsupported operation: {operation}"
         )
 
-
     # ========================================================
-    # STEP 3
-    # GEMINI EXPLAINS ACTUAL RESULT
+    # STEP 3: GEMINI EXPLAINS RESULT
     # ========================================================
 
     explanation = explain_result(
@@ -262,10 +319,8 @@ def run_analysis(
         result
     )
 
-
     # ========================================================
-    # STEP 4
-    # RETURN
+    # STEP 4: RETURN EVERYTHING
     # ========================================================
 
     return {
@@ -276,7 +331,7 @@ def run_analysis(
 
 
 # TODO Rename this here and in `run_analysis`
-def _extracted_from_run_analysis_225(plan, df):
+def _extracted_from_run_analysis_303(plan, df):
     filter_column = plan.get(
         "filter_column"
     )
@@ -304,11 +359,102 @@ def _extracted_from_run_analysis_225(plan, df):
             "No value column specified."
         )
 
-    return filter_and_sum(df, filter_column, filter_value, value_column)
+    return filtered_unique_count(df, filter_column, filter_value, value_column)
 
 
 # TODO Rename this here and in `run_analysis`
-def _extracted_from_run_analysis_138(plan, df):
+def _extracted_from_run_analysis_272(plan, df):
+    filter_column = plan.get(
+        "filter_column"
+    )
+
+    filter_value = plan.get(
+        "filter_value"
+    )
+
+    count_column = plan.get(
+        "count_column"
+    )
+
+    if not filter_column:
+        raise ValueError(
+            "No filter column specified."
+        )
+
+    if filter_value is None:
+        raise ValueError(
+            "No filter value specified."
+        )
+
+    return filtered_count(df, filter_column, filter_value, count_column)
+
+
+# TODO Rename this here and in `run_analysis`
+def _extracted_from_run_analysis_391(plan, df):
+    filter_column = plan.get(
+        "filter_column"
+    )
+
+    filter_value = plan.get(
+        "filter_value"
+    )
+
+    value_column = plan.get(
+        "value_column"
+    )
+
+    if not filter_column:
+        raise ValueError(
+            "No filter column specified."
+        )
+
+    if filter_value is None:
+        raise ValueError(
+            "No filter value specified."
+        )
+
+    if not value_column:
+        raise ValueError(
+            "No value column specified."
+        )
+
+    return filtered_average(df, filter_column, filter_value, value_column)
+
+
+# TODO Rename this here and in `run_analysis`
+def _extracted_from_run_analysis_351(plan, df):
+    filter_column = plan.get(
+        "filter_column"
+    )
+
+    filter_value = plan.get(
+        "filter_value"
+    )
+
+    value_column = plan.get(
+        "value_column"
+    )
+
+    if not filter_column:
+        raise ValueError(
+            "No filter column specified."
+        )
+
+    if filter_value is None:
+        raise ValueError(
+            "No filter value specified."
+        )
+
+    if not value_column:
+        raise ValueError(
+            "No value column specified."
+        )
+
+    return filtered_sum(df, filter_column, filter_value, value_column)
+
+
+# TODO Rename this here and in `run_analysis`
+def _extracted_from_run_analysis_211(plan, df):
     group_column = plan.get(
         "group_column"
     )

@@ -2,11 +2,11 @@ import pandas as pd
 import streamlit as st
 
 from data_profile import create_profile
-from analyst import run_analysis
+from analyst import run_analysis # pyright: ignore[reportAttributeAccessIssue]
 
 
 # ============================================================
-# PAGE CONFIGURATION
+# PAGE CONFIG
 # ============================================================
 
 st.set_page_config(
@@ -20,11 +20,13 @@ st.set_page_config(
 # HEADER
 # ============================================================
 
-st.title("📊 AI Data Analyst")
+st.title(
+    "📊 AI Data Analyst"
+)
 
 st.write(
-    "Upload a CSV or Excel dataset and ask questions "
-    "using natural language."
+    "Upload a CSV or Excel dataset and ask "
+    "questions using natural language."
 )
 
 
@@ -34,46 +36,43 @@ st.write(
 
 uploaded_file = st.file_uploader(
     "Upload CSV or Excel file",
-    type=["csv", "xlsx"],
+    type=[
+        "csv",
+        "xlsx"
+    ],
 )
 
 
 # ============================================================
-# MAIN APPLICATION
+# APPLICATION
 # ============================================================
 
 if uploaded_file is not None:
 
     # ========================================================
-    # LOAD DATASET
+    # LOAD DATA
     # ========================================================
 
     try:
 
-        if uploaded_file.name.lower().endswith(".csv"):
+        if uploaded_file.name.lower().endswith(
+            ".csv"
+        ):
 
             df = pd.read_csv(
                 uploaded_file
             )
 
-        elif uploaded_file.name.lower().endswith(".xlsx"):
+        else:
 
             df = pd.read_excel(
                 uploaded_file
             )
 
-        else:
-
-            st.error(
-                "Unsupported file type."
-            )
-
-            st.stop()
-
     except Exception as e:
 
         st.error(
-            f"Could not read the file: {e}"
+            f"Could not read dataset: {e}"
         )
 
         st.stop()
@@ -97,47 +96,50 @@ if uploaded_file is not None:
         "📋 Dataset Overview"
     )
 
-    col1, col2, col3, col4 = st.columns(4)
+    c1, c2, c3, c4 = st.columns(4)
 
-    with col1:
+    with c1:
 
         st.metric(
             "Rows",
             f"{len(df):,}"
         )
 
-    with col2:
+    with c2:
 
         st.metric(
             "Columns",
             f"{len(df.columns):,}"
         )
 
-    with col3:
+    with c3:
 
-        missing_values = int(
-            df.isna().sum().sum()
+        missing = int(
+            df.isna()
+            .sum()
+            .sum()
         )
 
         st.metric(
             "Missing Values",
-            f"{missing_values:,}"
+            f"{missing:,}"
         )
 
-    with col4:
+    with c4:
 
-        duplicate_rows = int(
-            df.duplicated().sum()
+        duplicates = int(
+            df.duplicated()
+            .sum()
         )
 
         st.metric(
             "Duplicate Rows",
-            f"{duplicate_rows:,}"
+            f"{duplicates:,}"
         )
 
 
     # ========================================================
-    # DATA PREVIEW
+    # PREVIEW
     # ========================================================
 
     with st.expander(
@@ -158,30 +160,32 @@ if uploaded_file is not None:
         "🔎 Column information"
     ):
 
-        column_info = pd.DataFrame(
-            {
-                "Column": df.columns,
+        column_info = pd.DataFrame({
 
-                "Data Type": [
-                    str(df[column].dtype)
-                    for column in df.columns
-                ],
+            "Column": df.columns,
 
-                "Missing Values": [
-                    int(
-                        df[column].isna().sum()
-                    )
-                    for column in df.columns
-                ],
+            "Data Type": [
+                str(
+                    df[c].dtype
+                )
+                for c in df.columns
+            ],
 
-                "Unique Values": [
-                    int(
-                        df[column].nunique()
-                    )
-                    for column in df.columns
-                ],
-            }
-        )
+            "Missing Values": [
+                int(
+                    df[c].isna().sum()
+                )
+                for c in df.columns
+            ],
+
+            "Unique Values": [
+                int(
+                    df[c].nunique()
+                )
+                for c in df.columns
+            ],
+
+        })
 
         st.dataframe(
             column_info,
@@ -190,7 +194,7 @@ if uploaded_file is not None:
 
 
     # ========================================================
-    # AI DATA ANALYST
+    # AI ANALYST
     # ========================================================
 
     st.divider()
@@ -205,50 +209,53 @@ if uploaded_file is not None:
 
 
     # ========================================================
+    # EXAMPLE QUESTIONS
+    # ========================================================
+
+    st.info(
+        """
+Try questions like:
+
+• What is the total revenue?
+
+• What are the top 5 cities by revenue?
+
+• Which brand has the highest revenue?
+
+• What is the average selling price?
+
+• What percentage of revenue comes from each city?
+
+• What is the monthly revenue?
+
+• How many customers are there?
+
+• What is the average salary by department?
+"""
+    )
+
+
+    # ========================================================
     # QUESTION
     # ========================================================
 
     question = st.text_input(
         "Your question",
         placeholder=(
-            "Example: What are the top 5 cities by revenue?"
+            "Example: What is the total revenue?"
         ),
     )
 
 
     # ========================================================
-    # EXAMPLE QUESTIONS
-    # ========================================================
-
-    st.caption(
-        "Try questions like:"
-    )
-
-    example_questions = [
-        "What is the total revenue?",
-        "What are the top 5 cities by revenue?",
-        "Which brand has the highest revenue?",
-        "What is the average selling price?",
-        "What percentage of revenue comes from each city?",
-        "What is the monthly revenue?",
-    ]
-
-    for example in example_questions:
-
-        st.caption(
-            f"• {example}"
-        )
-
-
-    # ========================================================
-    # RUN ANALYSIS
+    # RUN
     # ========================================================
 
     if question.strip():
 
-        # ----------------------------------------------------
-        # PROFILE DATASET
-        # ----------------------------------------------------
+        # ====================================================
+        # PROFILE
+        # ====================================================
 
         with st.spinner(
             "🔍 Understanding your dataset..."
@@ -263,15 +270,15 @@ if uploaded_file is not None:
             except Exception as e:
 
                 st.error(
-                    f"Could not profile dataset: {e}"
+                    f"Profiling failed: {e}"
                 )
 
                 st.stop()
 
 
-        # ----------------------------------------------------
-        # RUN AI AGENT
-        # ----------------------------------------------------
+        # ====================================================
+        # ANALYSIS
+        # ====================================================
 
         with st.spinner(
             "🤖 Analyzing your question..."
@@ -295,7 +302,7 @@ if uploaded_file is not None:
 
 
         # ====================================================
-        # AI ANSWER
+        # ANSWER
         # ====================================================
 
         st.subheader(
@@ -308,7 +315,7 @@ if uploaded_file is not None:
 
 
         # ====================================================
-        # ANALYSIS DETAILS
+        # DETAILS
         # ====================================================
 
         with st.expander(
@@ -324,15 +331,15 @@ if uploaded_file is not None:
             )
 
 
+            result = response["result"]
+
             st.write(
                 "**Actual Python result:**"
             )
 
-            result = response["result"]
-
 
             # =================================================
-            # DATAFRAME RESULT
+            # DATAFRAME
             # =================================================
 
             if isinstance(
@@ -340,10 +347,8 @@ if uploaded_file is not None:
                 pd.DataFrame
             ):
 
-                display_result = result.copy()
-
                 st.dataframe(
-                    display_result,
+                    result,
                     use_container_width=True
                 )
 
@@ -352,9 +357,10 @@ if uploaded_file is not None:
                 # VISUALIZATION
                 # =============================================
 
-                if len(result.columns) >= 2:
-
-                    st.divider()
+                if (
+                    len(result.columns) >= 2
+                    and len(result) > 0
+                ):
 
                     st.subheader(
                         "📊 Visualization"
@@ -370,70 +376,46 @@ if uploaded_file is not None:
                         chart_data.columns[1]
                     )
 
-                    chart_data = (
-                        chart_data
-                        .set_index(
-                            category_column
-                        )
-                    )
 
-                    st.bar_chart(
-                        chart_data[
-                            value_column
-                        ]
-                    )
+                    try:
 
-
-                    # =========================================
-                    # PERCENTAGE CHART
-                    # =========================================
-
-                    if "Percentage" in result.columns:
-
-                        percentage_data = (
-                            result
+                        chart_data = (
+                            chart_data
                             .set_index(
                                 category_column
                             )
                         )
 
-                        st.write(
-                            "### 📈 Percentage Distribution"
-                        )
-
                         st.bar_chart(
-                            percentage_data[
-                                "Percentage"
+                            chart_data[
+                                value_column
                             ]
                         )
 
+                    except Exception:
+
+                        st.info(
+                            "A chart could not be generated "
+                            "for this result."
+                        )
+
 
             # =================================================
-            # FLOAT
+            # NUMBERS
             # =================================================
 
             elif isinstance(
                 result,
-                float
+                (float, int)
             ):
 
-                st.metric(
-                    "Result",
+                st.write(
                     f"{result:,.2f}"
-                )
-
-
-            # =================================================
-            # INTEGER
-            # =================================================
-
-            elif isinstance(
-                result,
-                int
-            ):
-
-                st.metric(
-                    "Result",
+                    if isinstance(
+                        result,
+                        float
+                    )
+                    else
                     f"{result:,}"
                 )
 
