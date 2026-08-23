@@ -11,8 +11,8 @@ from typing import Any, Dict, List, Optional
 import pandas as pd
 
 from analysis_tools import (
-    calculate_sum, # pyright: ignore[reportAttributeAccessIssue]
-    calculate_average, # pyright: ignore[reportAttributeAccessIssue]
+    calculate_sum,
+    calculate_average,
     calculate_count,
     calculate_unique_count,
     calculate_min,
@@ -40,7 +40,21 @@ from analysis_tools import (
 # ============================================================
 # OPTIONAL GEMINI
 # ============================================================
-# OFF by default. Normal supported questions make ZERO API calls.
+#
+# Gemini is OFF by default.
+#
+# Normal supported questions make ZERO API calls.
+#
+# To enable Gemini fallback:
+#
+# ANALYST_USE_GEMINI=1
+# GEMINI_API_KEY=your_key
+#
+# Optional:
+#
+# GEMINI_MODEL=gemini-3.6-flash
+#
+# ============================================================
 
 try:
     from dotenv import load_dotenv
@@ -50,14 +64,24 @@ except Exception:
     pass
 
 
-MODEL_NAME = os.getenv("GEMINI_MODEL", "gemini-3.6-flash")
+MODEL_NAME = os.getenv(
+    "GEMINI_MODEL",
+    "gemini-3.6-flash",
+)
 
-USE_GEMINI = os.getenv("ANALYST_USE_GEMINI", "0").lower() in {
-    "1",
-    "true",
-    "yes",
-    "on",
-}
+USE_GEMINI = (
+    os.getenv(
+        "ANALYST_USE_GEMINI",
+        "0",
+    )
+    .lower()
+    in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+)
 
 client = None
 
@@ -65,10 +89,14 @@ if USE_GEMINI:
     try:
         from google import genai
 
-        key = os.getenv("GEMINI_API_KEY")
+        api_key = os.getenv(
+            "GEMINI_API_KEY"
+        )
 
-        if key:
-            client = genai.Client(api_key=key)
+        if api_key:
+            client = genai.Client(
+                api_key=api_key
+            )
         else:
             USE_GEMINI = False
 
@@ -144,109 +172,233 @@ FILTERED_OPS = {
 }
 
 
+FILTER_OPERATORS = {
+    "=",
+    "==",
+    "!=",
+    ">",
+    ">=",
+    "<",
+    "<=",
+    "contains",
+    "between",
+}
+
+
 # ============================================================
 # GENERAL HELPERS
 # ============================================================
 
-def validate_dataframe(df: pd.DataFrame) -> None:
+def validate_dataframe(
+    df: pd.DataFrame,
+) -> None:
     """Validate that df is a usable pandas DataFrame."""
-    if df is None:
-        raise ValueError("DataFrame cannot be None.")
 
-    if not isinstance(df, pd.DataFrame):
-        raise TypeError("df must be a pandas DataFrame.")
+    if df is None:
+        raise ValueError(
+            "DataFrame cannot be None."
+        )
+
+    if not isinstance(
+        df,
+        pd.DataFrame,
+    ):
+        raise TypeError(
+            "df must be a pandas DataFrame."
+        )
 
     if df.empty:
-        raise ValueError("The dataset is empty.")
+        raise ValueError(
+            "The dataset is empty."
+        )
 
     if len(df.columns) == 0:
-        raise ValueError("The dataset has no columns.")
+        raise ValueError(
+            "The dataset has no columns."
+        )
 
 
-def get_dataset_columns(df: pd.DataFrame) -> List[str]:
+def get_dataset_columns(
+    df: pd.DataFrame,
+) -> List[str]:
     """Return dataset column names as strings."""
+
     validate_dataframe(df)
-    return [str(c) for c in df.columns]
+
+    return [
+        str(column)
+        for column in df.columns
+    ]
 
 
-def _norm(value: Any) -> str:
+def _norm(
+    value: Any,
+) -> str:
     """Normalize text for matching."""
-    return re.sub(r"\s+", " ", str(value).strip().lower()).strip()
+
+    return re.sub(
+        r"\s+",
+        " ",
+        str(value)
+        .strip()
+        .lower(),
+    ).strip()
 
 
-def _safe(value: Any) -> Any:
-    """Convert pandas/numpy values into JSON-safe Python values."""
+def _safe(
+    value: Any,
+) -> Any:
+    """
+    Convert pandas/numpy values into
+    JSON-safe Python values.
+    """
+
     if value is None:
         return None
 
-    if isinstance(value, dict):
+    if isinstance(
+        value,
+        dict,
+    ):
         return {
-            str(k): _safe(v)
-            for k, v in value.items()
+            str(key): _safe(item)
+            for key, item in value.items()
         }
 
-    if isinstance(value, (list, tuple)):
-        return [_safe(v) for v in value]
-
-    if isinstance(value, pd.DataFrame):
+    if isinstance(
+        value,
+        (list, tuple),
+    ):
         return [
-            _safe(x)
-            for x in value.to_dict(orient="records")
+            _safe(item)
+            for item in value
         ]
 
-    if isinstance(value, pd.Series):
+    if isinstance(
+        value,
+        pd.DataFrame,
+    ):
+        return [
+            _safe(record)
+            for record in value.to_dict(
+                orient="records"
+            )
+        ]
+
+    if isinstance(
+        value,
+        pd.Series,
+    ):
         return {
-            str(k): _safe(v)
-            for k, v in value.to_dict().items()
+            str(key): _safe(item)
+            for key, item in value.to_dict().items()
         }
 
-    if hasattr(value, "item"):
-        with contextlib.suppress(Exception):
-            return _safe(value.item())
+    if hasattr(
+        value,
+        "item",
+    ):
+        with contextlib.suppress(
+            Exception
+        ):
+            return _safe(
+                value.item()
+            )
 
-    if hasattr(value, "isoformat"):
-        with contextlib.suppress(Exception):
+    if hasattr(
+        value,
+        "isoformat",
+    ):
+        with contextlib.suppress(
+            Exception
+        ):
             return value.isoformat()
 
     try:
         json.dumps(value)
         return value
+
     except Exception:
         return str(value)
 
 
-def serialize_result(result: Any) -> Any:
-    """Public serialization helper."""
+def serialize_result(
+    result: Any,
+) -> Any:
+    """Public result serialization helper."""
+
     return _safe(result)
 
 
-def extract_json(text: str) -> Dict[str, Any]:
-    """Extract a JSON object from a model response."""
+# ============================================================
+# JSON EXTRACTION
+# ============================================================
+
+def extract_json(
+    text: str,
+) -> Dict[str, Any]:
+    """Extract a JSON object from model output."""
+
     if not text:
-        raise ValueError("Empty JSON response.")
+        raise ValueError(
+            "Empty JSON response."
+        )
+
+    text = text.strip()
 
     text = re.sub(
-        r"```json|```",
+        r"```json",
         "",
         text,
         flags=re.IGNORECASE,
-    ).strip()
+    )
 
-    with contextlib.suppress(json.JSONDecodeError):
+    text = re.sub(
+        r"```",
+        "",
+        text,
+    )
+
+    text = text.strip()
+
+    with contextlib.suppress(
+        json.JSONDecodeError
+    ):
         value = json.loads(text)
 
-        if isinstance(value, dict):
+        if isinstance(
+            value,
+            dict,
+        ):
             return value
 
     start = text.find("{")
     end = text.rfind("}")
 
     if start < 0 or end <= start:
-        raise ValueError("No JSON object found.")
+        raise ValueError(
+            "No JSON object found in model response."
+        )
 
-    value = json.loads(text[start:end + 1])
+    json_text = text[
+        start : end + 1
+    ]
 
-    if not isinstance(value, dict):
+    try:
+        value = json.loads(
+            json_text
+        )
+
+    except json.JSONDecodeError as exc:
+        raise ValueError(
+            "Could not parse model JSON: "
+            f"{exc}"
+        ) from exc
+
+    if not isinstance(
+        value,
+        dict,
+    ):
         raise ValueError(
             "Analysis plan must be a JSON object."
         )
@@ -258,42 +410,59 @@ def extract_json(text: str) -> Dict[str, Any]:
 # PROFILE
 # ============================================================
 
-def build_profile(df: pd.DataFrame) -> Dict[str, Any]:
-    """Build a dataset profile from the real DataFrame."""
+def build_profile(
+    df: pd.DataFrame,
+) -> Dict[str, Any]:
+    """Build a profile from the real DataFrame."""
+
     validate_dataframe(df)
 
     columns = get_dataset_columns(df)
 
-    numeric = [
-        c
-        for c in columns
-        if pd.api.types.is_numeric_dtype(df[c])
+    numeric_columns = [
+        column
+        for column in columns
+        if pd.api.types.is_numeric_dtype(
+            df[column]
+        )
     ]
 
-    dates = [
-        c
-        for c in columns
-        if pd.api.types.is_datetime64_any_dtype(df[c])
+    datetime_columns = [
+        column
+        for column in columns
+        if pd.api.types.is_datetime64_any_dtype(
+            df[column]
+        )
+    ]
+
+    text_columns = [
+        column
+        for column in columns
+        if column not in numeric_columns
+        and column not in datetime_columns
     ]
 
     return {
         "columns": columns,
         "row_count": len(df),
-        "numeric_columns": numeric,
-        "datetime_columns": dates,
-        "text_columns": [
-            c
-            for c in columns
-            if c not in numeric and c not in dates
-        ],
+        "numeric_columns": numeric_columns,
+        "datetime_columns": datetime_columns,
+        "text_columns": text_columns,
     }
 
 
 def normalize_profile(
     df: pd.DataFrame,
-    profile: Optional[Dict[str, Any]],
+    profile: Optional[
+        Dict[str, Any]
+    ],
 ) -> Dict[str, Any]:
-    """Normalize a supplied profile while treating df as authoritative."""
+    """
+    Normalize a supplied profile.
+
+    The real DataFrame is authoritative.
+    """
+
     validate_dataframe(df)
 
     generated = build_profile(df)
@@ -301,39 +470,71 @@ def normalize_profile(
     if profile is None:
         return generated
 
-    if not isinstance(profile, dict):
+    if not isinstance(
+        profile,
+        dict,
+    ):
         raise ValueError(
             "Dataset profile must be a dictionary."
         )
 
     result = dict(profile)
 
-    # The actual DataFrame is authoritative.
-    result["columns"] = generated["columns"]
+    # Actual DataFrame columns always win.
+    result["columns"] = generated[
+        "columns"
+    ]
 
     for key, value in generated.items():
-        result.setdefault(key, value)
+        result.setdefault(
+            key,
+            value,
+        )
 
     return result
 
 
 def _profile_columns(
-    profile: Optional[Dict[str, Any]],
+    profile: Optional[
+        Dict[str, Any]
+    ],
 ) -> List[str]:
+    """Return normalized profile columns."""
+
     if profile is None:
         return []
 
-    if not isinstance(profile, dict):
+    if not isinstance(
+        profile,
+        dict,
+    ):
         raise ValueError(
             "Dataset profile must be a dictionary."
         )
 
-    columns = profile.get("columns", [])
+    columns = profile.get(
+        "columns",
+        [],
+    )
 
-    if isinstance(columns, dict):
-        columns = list(columns.keys())
+    if isinstance(
+        columns,
+        dict,
+    ):
+        columns = list(
+            columns.keys()
+        )
 
-    return [str(x) for x in columns] if isinstance(columns, (list, tuple)) else []
+    if isinstance(
+        columns,
+        (list, tuple),
+    ):
+        return [
+            str(column)
+            for column in columns
+        ]
+
+    return []
 
 
 # ============================================================
@@ -344,16 +545,23 @@ def _find_column(
     question: str,
     columns: List[str],
 ) -> Optional[str]:
-    """Find an explicitly mentioned column."""
+    """
+    Find an explicitly mentioned column.
+
+    Longest names are checked first.
+    """
+
     q = _norm(question)
 
-    # Longest names first so that e.g. Customer_ID
-    # is preferred over Customer.
     return next(
         (
-            c
-            for c in sorted(columns, key=len, reverse=True)
-            if _norm(c) in q
+            column
+            for column in sorted(
+                columns,
+                key=len,
+                reverse=True,
+            )
+            if _norm(column) in q
         ),
         None,
     )
@@ -364,50 +572,65 @@ def _semantic_column(
     keywords: List[str],
 ) -> Optional[str]:
     """Find the best semantic column match."""
+
     scored = []
 
     normalized_keywords = [
-        _norm(key)
-        for key in keywords
+        _norm(keyword)
+        for keyword in keywords
     ]
 
-    for c in columns:
-        name = _norm(c)
+    for column in columns:
+        name = _norm(column)
         score = 0
 
-        for key in normalized_keywords:
-            if name == key:
+        for keyword in normalized_keywords:
+
+            if name == keyword:
                 score += 100
-            elif key in name:
+
+            elif keyword in name:
                 score += 20
 
         if score:
             scored.append(
                 (
                     score,
-                    -len(c),
-                    c,
+                    -len(column),
+                    column,
                 )
             )
 
     return None if not scored else max(scored)[2]
 
 
-def _numeric_columns(df: pd.DataFrame) -> List[str]:
+def _numeric_columns(
+    df: pd.DataFrame,
+) -> List[str]:
+    """Return numeric columns."""
+
     return [
-        str(c)
-        for c in df.columns
-        if pd.api.types.is_numeric_dtype(df[c])
+        str(column)
+        for column in df.columns
+        if pd.api.types.is_numeric_dtype(
+            df[column]
+        )
     ]
 
 
-def _text_columns(df: pd.DataFrame) -> List[str]:
-    numeric = set(_numeric_columns(df))
+def _text_columns(
+    df: pd.DataFrame,
+) -> List[str]:
+    """Return non-numeric columns."""
+
+    numeric = set(
+        _numeric_columns(df)
+    )
 
     return [
-        str(c)
-        for c in df.columns
-        if str(c) not in numeric
+        str(column)
+        for column in df.columns
+        if str(column) not in numeric
     ]
 
 
@@ -415,7 +638,8 @@ def _value_column(
     question: str,
     df: pd.DataFrame,
 ) -> Optional[str]:
-    """Choose a numeric value column."""
+    """Choose the numeric value column."""
+
     columns = get_dataset_columns(df)
     numeric = _numeric_columns(df)
 
@@ -449,18 +673,18 @@ def _value_column(
         ],
     )
 
-    return found or (
-        numeric[0]
-        if numeric
-        else None
-    )
+    if found:
+        return found
+
+    return numeric[0] if numeric else None
 
 
 def _group_column(
     question: str,
     df: pd.DataFrame,
 ) -> Optional[str]:
-    """Choose a grouping column."""
+    """Choose the grouping column."""
+
     columns = get_dataset_columns(df)
 
     explicit = _find_column(
@@ -489,14 +713,14 @@ def _group_column(
             "brand",
             "segment",
             "type",
+            "location",
         ],
     )
 
-    return found or (
-        text[0]
-        if text
-        else None
-    )
+    if found:
+        return found
+
+    return text[0] if text else None
 
 
 def _count_column(
@@ -504,56 +728,61 @@ def _count_column(
     df: pd.DataFrame,
 ) -> str:
     """Choose the column whose rows should be counted."""
+
     columns = get_dataset_columns(df)
     q = _norm(question)
 
-    if "invoice" in q:
-        found = _semantic_column(
-            columns,
+    candidates = [
+        (
+            "invoice",
             [
                 "invoice",
                 "invoice_id",
                 "invoice id",
             ],
-        )
-
-        if found:
-            return found
-
-    if "order" in q:
-        found = _semantic_column(
-            columns,
+        ),
+        (
+            "order",
             [
                 "order",
                 "order_id",
                 "order id",
             ],
-        )
-
-        if found:
-            return found
-
-    if "transaction" in q:
-        found = _semantic_column(
-            columns,
+        ),
+        (
+            "transaction",
             [
                 "transaction",
                 "transaction_id",
                 "transaction id",
             ],
-        )
-
-        if found:
-            return found
-
-    if "customer" in q:
-        found = _semantic_column(
-            columns,
+        ),
+        (
+            "customer",
             [
                 "customer",
                 "customer_id",
                 "customer id",
             ],
+        ),
+        (
+            "employee",
+            [
+                "employee",
+                "employee_id",
+                "employee id",
+            ],
+        ),
+    ]
+
+    for trigger, keys in candidates:
+
+        if trigger not in q:
+            continue
+
+        found = _semantic_column(
+            columns,
+            keys,
         )
 
         if found:
@@ -571,7 +800,8 @@ def _unique_column(
     question: str,
     df: pd.DataFrame,
 ) -> str:
-    """Choose the column whose distinct values should be counted."""
+    """Choose the column whose distinct values are counted."""
+
     columns = get_dataset_columns(df)
     q = _norm(question)
 
@@ -617,6 +847,14 @@ def _unique_column(
             ],
         ),
         (
+            "transaction",
+            [
+                "transaction",
+                "transaction_id",
+                "transaction id",
+            ],
+        ),
+        (
             "city",
             [
                 "city",
@@ -625,31 +863,40 @@ def _unique_column(
     ]
 
     for trigger, keys in candidates:
-        if trigger in q:
-            found = _semantic_column(
-                columns,
-                keys,
-            )
 
-            if found:
-                return found
+        if trigger not in q:
+            continue
 
-    return (
-        _find_column(question, columns)
-        or columns[0]
+        found = _semantic_column(
+            columns,
+            keys,
+        )
+
+        if found:
+            return found
+
+    explicit = _find_column(
+        question,
+        columns,
     )
+
+    return explicit or columns[0]
 
 
 # ============================================================
-# FILTERS
+# FILTER HELPERS
 # ============================================================
 
 def _coerce(
     value: Any,
     series: pd.Series,
 ) -> Any:
-    """Coerce a textual value to the type used by a DataFrame column."""
-    if not isinstance(value, str):
+    """Coerce text into the column's data type."""
+
+    if not isinstance(
+        value,
+        str,
+    ):
         return value
 
     value = (
@@ -660,22 +907,45 @@ def _coerce(
         .strip()
     )
 
-    if pd.api.types.is_numeric_dtype(series):
-        with contextlib.suppress(ValueError):
-            return (
-                float(value)
-                if "." in value
-                else int(value)
-            )
+    if pd.api.types.is_numeric_dtype(
+        series
+    ):
+        with contextlib.suppress(
+            ValueError
+        ):
+            return float(value)
 
-    if pd.api.types.is_bool_dtype(series):
+        with contextlib.suppress(
+            ValueError
+        ):
+            return int(value)
+
+    if pd.api.types.is_bool_dtype(
+        series
+    ):
         lowered = value.lower()
 
-        if lowered in {"true", "yes"}:
+        if lowered in {
+            "true",
+            "yes",
+        }:
             return True
 
-        if lowered in {"false", "no"}:
+        if lowered in {
+            "false",
+            "no",
+        }:
             return False
+
+    if pd.api.types.is_datetime64_any_dtype(
+        series
+    ):
+        with contextlib.suppress(
+            Exception
+        ):
+            return pd.to_datetime(
+                value
+            )
 
     return value
 
@@ -686,13 +956,18 @@ def _dataset_value(
     df: pd.DataFrame,
 ) -> Any:
     """
-    Resolve a textual value against an actual dataset value.
+    Resolve a textual value against an
+    actual dataset value.
 
-    For example:
-        "delhi" -> "Delhi"
-        "laptop" -> "Laptop"
+    Example:
+        delhi -> Delhi
+        laptop -> Laptop
     """
-    if not isinstance(value, str):
+
+    if not isinstance(
+        value,
+        str,
+    ):
         return value
 
     value = (
@@ -705,10 +980,14 @@ def _dataset_value(
 
     series = df[column]
 
-    mask = (
+    normalized = (
         series.astype(str)
         .str.strip()
         .str.lower()
+    )
+
+    mask = (
+        normalized
         == value.lower()
     )
 
@@ -720,45 +999,46 @@ def _dataset_value(
             series,
         )
     )
-    
-
 
 def _find_column_for_value(
     value: str,
     df: pd.DataFrame,
-    preferred_keywords: Optional[List[str]] = None,
+    preferred_keywords: Optional[
+        List[str]
+    ] = None,
 ) -> Optional[str]:
     """
-    Find a dataset column containing an exact value.
-
-    This is used for natural language filters such as:
-        in Delhi
-        for Laptop
+    Find a dataset column containing
+    an exact textual value.
     """
+
     value_norm = _norm(value)
 
     columns = get_dataset_columns(df)
 
-    preferred = preferred_keywords or []
+    preferred = (
+        preferred_keywords or []
+    )
 
     ordered_columns = sorted(
         columns,
-        key=lambda c: (
+        key=lambda column: (
             0
             if any(
-                _norm(key) in _norm(c)
-                for key in preferred
+                _norm(keyword)
+                in _norm(column)
+                for keyword in preferred
             )
             else 1,
-            len(c),
+            len(column),
         ),
     )
 
     for column in ordered_columns:
-        series = df[column]
 
         values = (
-            series.dropna()
+            df[column]
+            .dropna()
             .astype(str)
             .str.strip()
             .str.lower()
@@ -769,6 +1049,10 @@ def _find_column_for_value(
 
     return None
 
+
+# ============================================================
+# FILTER EXTRACTION
+# ============================================================
 
 def _extract_filters(
     question: str,
@@ -794,14 +1078,15 @@ def _extract_filters(
         from Delhi
         City Delhi
         Product Laptop
-
-    Natural-language equality is only accepted when the value
-    actually exists in a DataFrame column.
     """
+
     columns = get_dataset_columns(df)
     q = question.strip()
 
-    filters: List[Dict[str, Any]] = []
+    filters: List[
+        Dict[str, Any]
+    ] = []
+
     used_columns: set[str] = set()
 
     def add(
@@ -809,26 +1094,27 @@ def _extract_filters(
         operator: str,
         value: Any,
     ) -> None:
+
         if column in used_columns:
             return
 
-        if isinstance(value, str):
+        if isinstance(
+            value,
+            str,
+        ):
             value = _dataset_value(
                 column,
                 value,
                 df,
             )
 
-        normalized_operator = (
-            "="
-            if operator == "=="
-            else operator
-        )
+        if operator == "==":
+            operator = "="
 
         filters.append(
             {
                 "column": column,
-                "operator": normalized_operator,
+                "operator": operator,
                 "value": value,
             }
         )
@@ -836,17 +1122,21 @@ def _extract_filters(
         used_columns.add(column)
 
     # --------------------------------------------------------
-    # Explicit column + between.
-    # Example:
-    # Salary between 50000 and 70000
+    # Explicit column + BETWEEN
     # --------------------------------------------------------
 
     for column in columns:
-        escaped = re.escape(column)
+
+        if column in used_columns:
+            continue
+
+        escaped = re.escape(
+            column
+        )
 
         pattern = (
-            rf"\b{escaped}\b"
-            rf"\s+(between)\s+"
+            rf"(?<!\w){escaped}(?!\w)"
+            rf"\s+between\s+"
             rf"(.+?)"
             rf"\s+and\s+"
             rf"(.+?)"
@@ -859,45 +1149,47 @@ def _extract_filters(
             re.IGNORECASE,
         )
 
-        if match:
-            first_value = match[2].strip()
-            second_value = match[3].strip()
+        if not match:
+            continue
 
-            add(
-                column,
-                "between",
-                [
-                    _dataset_value(
-                        column,
-                        first_value,
-                        df,
-                    ),
-                    _dataset_value(
-                        column,
-                        second_value,
-                        df,
-                    ),
-                ],
-            )
+        first_value = match[1].strip()
+
+        second_value = match[2].strip()
+
+        add(
+            column,
+            "between",
+            [
+                _dataset_value(
+                    column,
+                    first_value,
+                    df,
+                ),
+                _dataset_value(
+                    column,
+                    second_value,
+                    df,
+                ),
+            ],
+        )
 
     # --------------------------------------------------------
-    # Explicit column + normal operators.
-    #
-    # Examples:
-    # City = Delhi
-    # Price > 500
-    # Product contains Laptop
+    # Explicit column + contains/is/operators
     # --------------------------------------------------------
 
     for column in columns:
+
         if column in used_columns:
             continue
 
-        escaped = re.escape(column)
+        escaped = re.escape(
+            column
+        )
 
         pattern = (
-            rf"\b{escaped}\b"
-            rf"\s*(>=|<=|!=|==|=|>|<|contains|is)"
+            rf"(?<!\w){escaped}(?!\w)"
+            rf"\s*"
+            rf"(>=|<=|!=|==|=|>|<|contains|is)"
             rf"\s*"
             rf"(.+?)"
             rf"(?=\s+(?:and|for|in|from|where)\b|[,;?]|$)"
@@ -912,7 +1204,8 @@ def _extract_filters(
         if not match:
             continue
 
-        operator = match[1].lower()
+        operator = match[1].lower().strip()
+
         raw_value = match[2].strip()
 
         if operator == "is":
@@ -930,6 +1223,7 @@ def _extract_filters(
                 "contains",
                 raw_value,
             )
+
         else:
             add(
                 column,
@@ -938,23 +1232,27 @@ def _extract_filters(
             )
 
     # --------------------------------------------------------
-    # Explicit numeric comparison.
+    # Explicit numeric comparisons
     #
-    # This is intentionally separate so that:
+    # Handles:
     # Price > 500
     # Salary >= 50000
-    # work reliably even if trailing text follows.
+    # Revenue < 1000
     # --------------------------------------------------------
 
     for column in columns:
+
         if column in used_columns:
             continue
 
-        escaped = re.escape(column)
+        escaped = re.escape(
+            column
+        )
 
         pattern = (
-            rf"\b{escaped}\b"
-            rf"\s*(>=|<=|!=|>|<)"
+            rf"(?<!\w){escaped}(?!\w)"
+            rf"\s*"
+            rf"(>=|<=|!=|>|<)"
             rf"\s*"
             rf"(-?\d+(?:\.\d+)?)"
         )
@@ -971,7 +1269,7 @@ def _extract_filters(
         add(column, match[1], _coerce(match[2], df[column]))
 
     # --------------------------------------------------------
-    # Generic "between X and Y".
+    # Generic numeric BETWEEN
     #
     # Example:
     # revenue between 100 and 500
@@ -987,12 +1285,17 @@ def _extract_filters(
     )
 
     if generic_between:
+
         value_column = _value_column(
             q,
             df,
         )
 
-        if value_column and value_column not in used_columns:
+        if (
+            value_column
+            and value_column
+            not in used_columns
+        ):
             add(
                 value_column,
                 "between",
@@ -1003,25 +1306,28 @@ def _extract_filters(
             )
 
     # --------------------------------------------------------
-    # Natural-language equality:
+    # Natural equality:
     #
-    # "in Delhi"
-    # "for Laptop"
-    # "from Delhi"
-    #
-    # The candidate must actually exist in the dataset.
+    # in Delhi
+    # for Laptop
+    # from Delhi
     # --------------------------------------------------------
 
     natural_pattern = re.compile(
         r"\b(in|for|from)\s+"
-        r"['\"]?([^,;?.]+?)['\"]?"
+        r"['\"]?"
+        r"([^,;?.]+?)"
+        r"['\"]?"
         r"(?=\s+(?:for|in|from|and|where)\b|[,;?.]|$)",
         re.IGNORECASE,
     )
 
-    natural_matches = natural_pattern.findall(q)
+    natural_matches = (
+        natural_pattern.findall(q)
+    )
 
     for keyword, raw_value in natural_matches:
+
         value = (
             raw_value
             .strip()
@@ -1032,9 +1338,10 @@ def _extract_filters(
         if not value:
             continue
 
-        preferred_keywords: List[str]
-
-        if keyword.lower() in {"in", "from"}:
+        if keyword.lower() in {
+            "in",
+            "from",
+        }:
             preferred_keywords = [
                 "city",
                 "state",
@@ -1042,6 +1349,7 @@ def _extract_filters(
                 "region",
                 "location",
             ]
+
         else:
             preferred_keywords = [
                 "product",
@@ -1049,6 +1357,7 @@ def _extract_filters(
                 "brand",
                 "type",
                 "segment",
+                "department",
             ]
 
         column = _find_column_for_value(
@@ -1065,24 +1374,47 @@ def _extract_filters(
             )
 
     # --------------------------------------------------------
-    # Natural equality using:
+    # Natural equality:
     #
-    # "City Delhi"
-    # "Product Laptop"
-    #
-    # Only consider explicit dataset column names.
+    # City Delhi
+    # Product Laptop
+    # Category Electronics
     # --------------------------------------------------------
 
+    operation_words = {
+        "revenue",
+        "sales",
+        "amount",
+        "profit",
+        "average",
+        "avg",
+        "mean",
+        "total",
+        "sum",
+        "count",
+        "maximum",
+        "minimum",
+        "highest",
+        "lowest",
+        "largest",
+        "smallest",
+    }
+
     for column in columns:
+
         if column in used_columns:
             continue
 
-        escaped = re.escape(column)
+        escaped = re.escape(
+            column
+        )
 
         pattern = (
-            rf"\b{escaped}\b"
+            rf"(?<!\w){escaped}(?!\w)"
             rf"\s+"
-            rf"['\"]?([^,;?.]+?)['\"]?"
+            rf"['\"]?"
+            rf"([^,;?.]+?)"
+            rf"['\"]?"
             rf"(?=\s+(?:and|for|in|from|where)\b|[,;?.]|$)"
         )
 
@@ -1100,22 +1432,7 @@ def _extract_filters(
         if not candidate:
             continue
 
-        # Avoid interpreting operation words as values.
-        if _norm(candidate) in {
-            "revenue",
-            "sales",
-            "amount",
-            "profit",
-            "average",
-            "mean",
-            "total",
-            "sum",
-            "count",
-            "maximum",
-            "minimum",
-            "highest",
-            "lowest",
-        }:
+        if _norm(candidate) in operation_words:
             continue
 
         dataset_values = set(
@@ -1136,12 +1453,24 @@ def _extract_filters(
     return filters
 
 
+# ============================================================
+# FILTER NORMALIZATION
+# ============================================================
+
 def normalize_filters(
     filters: Any,
-    df: Optional[pd.DataFrame] = None,
+    df: Optional[
+        pd.DataFrame
+    ] = None,
 ) -> List[Dict[str, Any]]:
-    """Validate and normalize filter definitions."""
-    if not isinstance(filters, list):
+    """
+    Validate and normalize filters.
+    """
+
+    if not isinstance(
+        filters,
+        list,
+    ):
         raise ValueError(
             "Filters must be a list."
         )
@@ -1151,66 +1480,81 @@ def normalize_filters(
             "At least one filter is required."
         )
 
-    supported = {
-        "=",
-        "==",
-        "!=",
-        ">",
-        ">=",
-        "<",
-        "<=",
-        "contains",
-        "between",
-    }
+    result: List[
+        Dict[str, Any]
+    ] = []
 
-    result: List[Dict[str, Any]] = []
+    for index, item in enumerate(
+        filters
+    ):
 
-    for i, item in enumerate(filters):
-        if not isinstance(item, dict):
+        if not isinstance(
+            item,
+            dict,
+        ):
             raise ValueError(
-                f"Filter #{i + 1} must be a dictionary."
+                f"Filter #{index + 1} "
+                "must be a dictionary."
             )
 
         if "column" not in item:
             raise ValueError(
-                f"Filter #{i + 1} is missing 'column'."
+                f"Filter #{index + 1} "
+                "is missing 'column'."
             )
 
         if "value" not in item:
             raise ValueError(
-                f"Filter #{i + 1} is missing 'value'."
+                f"Filter #{index + 1} "
+                "is missing 'value'."
             )
 
-        column = item["column"]
+        column = item[
+            "column"
+        ]
 
         if not column:
             raise ValueError(
-                f"Filter #{i + 1} has an empty column."
+                f"Filter #{index + 1} "
+                "has an empty column."
             )
 
         operator = str(
-            item.get("operator", "=") or "="
-        ).lower().strip()
+            item.get(
+                "operator",
+                "=",
+            )
+            or "="
+        ).strip().lower()
 
         if operator == "==":
             operator = "="
 
-        if operator not in supported:
+        if operator not in FILTER_OPERATORS:
             raise ValueError(
-                f"Unsupported filter operator "
-                f"'{operator}'."
+                f"Unsupported filter "
+                f"operator '{operator}'."
             )
 
-        value = item["value"]
+        value = item[
+            "value"
+        ]
 
         if operator == "between":
+
             if not isinstance(
                 value,
                 (list, tuple),
-            ) or len(value) != 2:
+            ):
                 raise ValueError(
-                    "The 'between' filter requires "
-                    "exactly two values."
+                    "The 'between' filter "
+                    "requires exactly two values."
+                )
+
+            if len(value) != 2:
+                raise ValueError(
+                    "The 'between' filter "
+                    "requires exactly two values."
                 )
 
             value = [
@@ -1218,8 +1562,13 @@ def normalize_filters(
                 value[1],
             ]
 
-        if df is not None and column in df.columns:
+        if (
+            df is not None
+            and column in df.columns
+        ):
+
             if operator == "between":
+
                 value = [
                     _coerce(
                         value[0],
@@ -1230,9 +1579,15 @@ def normalize_filters(
                         df[column],
                     ),
                 ]
+
             elif operator == "contains":
-                value = str(value).strip()
+
+                value = str(
+                    value
+                ).strip()
+
             else:
+
                 value = _coerce(
                     value,
                     df[column],
@@ -1257,25 +1612,38 @@ def validate_plan_columns(
     df: pd.DataFrame,
     plan: Dict[str, Any],
 ) -> None:
-    """Validate that all columns referenced by a plan exist."""
+    """
+    Validate every column referenced by
+    the analysis plan.
+    """
+
+    validate_dataframe(df)
+
     columns = set(
         get_dataset_columns(df)
     )
 
-    operation = plan.get("operation")
+    operation = plan.get(
+        "operation"
+    )
 
-    def require(key: str) -> None:
+    def require(
+        key: str,
+    ) -> None:
+
         value = plan.get(key)
 
         if not value:
             raise ValueError(
-                f"{operation} requires '{key}'."
+                f"{operation} requires "
+                f"'{key}'."
             )
 
         if value not in columns:
             raise ValueError(
                 f"Column '{value}' does not exist. "
-                f"Available columns: {sorted(columns)}"
+                f"Available columns: "
+                f"{sorted(columns)}"
             )
 
     if operation in COLUMN_OPS:
@@ -1293,37 +1661,62 @@ def validate_plan_columns(
         require("value_column")
 
     if operation in FILTERED_OPS:
-        filters = plan.get("filters")
 
-        if not isinstance(filters, list) or not filters:
+        filters = plan.get(
+            "filters"
+        )
+
+        if (
+            not isinstance(
+                filters,
+                list,
+            )
+            or not filters
+        ):
             raise ValueError(
-                f"{operation} requires 'filters'."
+                f"{operation} requires "
+                "'filters'."
             )
 
-        for i, filter_item in enumerate(filters):
-            if not isinstance(filter_item, dict):
+        for index, filter_item in enumerate(
+            filters
+        ):
+
+            if not isinstance(
+                filter_item,
+                dict,
+            ):
                 raise ValueError(
-                    f"Filter #{i + 1} must be a dictionary."
+                    f"Filter #{index + 1} "
+                    "must be a dictionary."
                 )
 
-            if not filter_item.get("column"):
+            filter_column = (
+                filter_item.get(
+                    "column"
+                )
+            )
+
+            if not filter_column:
                 raise ValueError(
-                    f"Filter #{i + 1} is missing 'column'."
+                    f"Filter #{index + 1} "
+                    "is missing 'column'."
                 )
 
-            if filter_item["column"] not in columns:
+            if (
+                filter_column
+                not in columns
+            ):
                 raise ValueError(
                     f"Filter column "
-                    f"'{filter_item['column']}' "
-                    f"does not exist."
+                    f"'{filter_column}' "
+                    "does not exist."
                 )
-
-            if "operator" not in filter_item:
-                filter_item["operator"] = "="
 
             if "value" not in filter_item:
                 raise ValueError(
-                    f"Filter #{i + 1} is missing 'value'."
+                    f"Filter #{index + 1} "
+                    "is missing 'value'."
                 )
 
         if operation in {
@@ -1356,14 +1749,21 @@ def validate_plan(
     plan: Dict[str, Any],
     profile: Dict[str, Any],
 ) -> Dict[str, Any]:
-    """Validate an analysis plan against the dataset profile."""
-    if not isinstance(plan, dict):
+    """Validate an analysis plan against a profile."""
+
+    if not isinstance(
+        plan,
+        dict,
+    ):
         raise ValueError(
             "Analysis plan must be a dictionary."
         )
 
     operation = str(
-        plan.get("operation", "")
+        plan.get(
+            "operation",
+            "",
+        )
     ).strip()
 
     if operation not in SUPPORTED_OPERATIONS:
@@ -1373,22 +1773,40 @@ def validate_plan(
         )
 
     result = dict(plan)
-    result["operation"] = operation
 
-    if operation.startswith("filtered_"):
-        result["filters"] = normalize_filters(
-            result.get("filters")
+    result[
+        "operation"
+    ] = operation
+
+    if operation.startswith(
+        "filtered_"
+    ):
+        result[
+            "filters"
+        ] = normalize_filters(
+            result.get(
+                "filters"
+            )
         )
 
     if operation in {
         "top_n",
         "filtered_top_n",
     }:
+
         try:
             n = int(
-                result.get("n", 5)
+                result.get(
+                    "n",
+                    5,
+                )
             )
-        except (TypeError, ValueError) as exc:
+
+        except (
+            TypeError,
+            ValueError,
+        ) as exc:
+
             raise ValueError(
                 "n must be an integer."
             ) from exc
@@ -1400,9 +1818,12 @@ def validate_plan(
 
         result["n"] = n
 
-    columns = _profile_columns(profile)
+    columns = _profile_columns(
+        profile
+    )
 
     if columns:
+
         for key in (
             "column",
             "group_column",
@@ -1410,25 +1831,33 @@ def validate_plan(
             "count_column",
             "date_column",
         ):
+
+            value = result.get(
+                key
+            )
+
             if (
-                key in result
-                and result[key]
-                and result[key] not in columns
+                value
+                and value not in columns
             ):
                 raise ValueError(
-                    f"Column '{result[key]}' "
-                    f"does not exist in the dataset."
+                    f"Column '{value}' "
+                    "does not exist in the dataset."
                 )
 
         for filter_item in result.get(
             "filters",
             [],
         ):
-            if filter_item["column"] not in columns:
+
+            if (
+                filter_item["column"]
+                not in columns
+            ):
                 raise ValueError(
                     f"Filter column "
                     f"'{filter_item['column']}' "
-                    f"does not exist."
+                    "does not exist."
                 )
 
     return result
@@ -1438,16 +1867,26 @@ def normalize_plan(
     df: pd.DataFrame,
     plan: Dict[str, Any],
 ) -> Dict[str, Any]:
-    """Validate and normalize a plan against the real DataFrame."""
+    """
+    Validate and normalize a plan
+    against the real DataFrame.
+    """
+
     validate_dataframe(df)
 
-    if not isinstance(plan, dict):
+    if not isinstance(
+        plan,
+        dict,
+    ):
         raise ValueError(
             "Analysis plan must be a dictionary."
         )
 
     operation = str(
-        plan.get("operation", "")
+        plan.get(
+            "operation",
+            "",
+        )
     ).strip()
 
     if operation not in SUPPORTED_OPERATIONS:
@@ -1457,11 +1896,20 @@ def normalize_plan(
         )
 
     result = dict(plan)
-    result["operation"] = operation
 
-    if operation.startswith("filtered_"):
-        result["filters"] = normalize_filters(
-            result.get("filters"),
+    result[
+        "operation"
+    ] = operation
+
+    if operation.startswith(
+        "filtered_"
+    ):
+        result[
+            "filters"
+        ] = normalize_filters(
+            result.get(
+                "filters"
+            ),
             df=df,
         )
 
@@ -1469,11 +1917,20 @@ def normalize_plan(
         "top_n",
         "filtered_top_n",
     }:
+
         try:
             n = int(
-                result.get("n", 5)
+                result.get(
+                    "n",
+                    5,
+                )
             )
-        except (TypeError, ValueError) as exc:
+
+        except (
+            TypeError,
+            ValueError,
+        ) as exc:
+
             raise ValueError(
                 "n must be an integer."
             ) from exc
@@ -1494,6 +1951,49 @@ def normalize_plan(
 
 
 # ============================================================
+# TOP N EXTRACTION
+# ============================================================
+
+def _extract_n(
+    question: str,
+    default: int = 5,
+) -> int:
+    """Extract N from top/first/best/highest/bottom N."""
+
+    match = re.search(
+        r"\b(?:top|first|best|highest|bottom)\s+(\d+)\b",
+        question,
+        re.IGNORECASE,
+    )
+
+    return default if not match else max(1, int(match[1]))
+
+
+def _has_grouping_intent(
+    question: str,
+) -> bool:
+    """Determine whether the question requests grouped output."""
+
+    q = _norm(question)
+
+    return any(
+        phrase in q
+        for phrase in (
+            " by ",
+            "group by",
+            "grouped by",
+            "per city",
+            "per product",
+            "per category",
+            "per department",
+            "per region",
+            "per state",
+            "per country",
+        )
+    )
+
+
+# ============================================================
 # DETERMINISTIC PLANNER
 # ============================================================
 
@@ -1501,7 +2001,11 @@ def deterministic_plan(
     question: str,
     df: pd.DataFrame,
 ) -> Dict[str, Any]:  # sourcery skip: low-code-quality
-    """Create an analysis plan without using an external API."""
+    """
+    Create an analysis plan without
+    using an external API.
+    """
+
     validate_dataframe(df)
 
     if not question or not question.strip():
@@ -1518,21 +2022,49 @@ def deterministic_plan(
 
     filtered = bool(filters)
 
+    grouping_intent = (
+        _has_grouping_intent(
+            question
+        )
+    )
+
     # --------------------------------------------------------
-    # Highest / top / best.
+    # TOP N / HIGHEST / BEST
     # --------------------------------------------------------
 
-    if any(
-        x in q
-        for x in (
-            "highest",
-            "largest",
-            "greatest",
-            "best performing",
-            "top ",
-            "maximum by",
+    explicit_top = (
+        re.search(
+            r"\btop\s+\d+\b",
+            q,
         )
+        is not None
+    )
+
+    top_words = (
+        "highest",
+        "largest",
+        "greatest",
+        "best performing",
+        "top ",
+        "maximum by",
+    )
+
+    top_intent = (
+        explicit_top
+        or any(
+            phrase in q
+            for phrase in top_words
+        )
+    )
+
+    # "highest revenue" by itself is a maximum.
+    # "highest revenue by city" is top-N grouped.
+    if top_intent and (
+        grouping_intent
+        or explicit_top
+        or " by " in q
     ):
+
         group = _group_column(
             question,
             df,
@@ -1544,6 +2076,7 @@ def deterministic_plan(
         )
 
         if group and value:
+
             return {
                 "operation": (
                     "filtered_top_n"
@@ -1551,7 +2084,9 @@ def deterministic_plan(
                     else "top_n"
                 ),
                 **(
-                    {"filters": filters}
+                    {
+                        "filters": filters
+                    }
                     if filtered
                     else {}
                 ),
@@ -1564,12 +2099,12 @@ def deterministic_plan(
             }
 
     # --------------------------------------------------------
-    # Percentage / share.
+    # PERCENTAGE / SHARE
     # --------------------------------------------------------
 
     if any(
-        x in q
-        for x in (
+        phrase in q
+        for phrase in (
             "percentage of total",
             "percent of total",
             "contribution",
@@ -1577,6 +2112,7 @@ def deterministic_plan(
             "share ",
         )
     ):
+
         group = _group_column(
             question,
             df,
@@ -1587,28 +2123,38 @@ def deterministic_plan(
             df,
         )
 
-        if group and value and not filtered:
+        if (
+            group
+            and value
+            and not filtered
+        ):
             return {
-                "operation": "percentage_of_total",
+                "operation":
+                    "percentage_of_total",
                 "group_column": group,
                 "value_column": value,
             }
 
     # --------------------------------------------------------
-    # Monthly.
+    # MONTHLY
     # --------------------------------------------------------
 
     if any(
-        x in q
-        for x in (
+        phrase in q
+        for phrase in (
             "monthly",
             "by month",
             "per month",
             "month wise",
             "month-wise",
             "monthly trend",
+            "monthly revenue",
+            "monthly sales",
+            "sales by month",
+            "revenue by month",
         )
     ):
+
         date = _semantic_column(
             get_dataset_columns(df),
             [
@@ -1624,6 +2170,7 @@ def deterministic_plan(
         )
 
         if date and value:
+
             return {
                 "operation": "monthly_sum",
                 "date_column": date,
@@ -1631,78 +2178,87 @@ def deterministic_plan(
             }
 
     # --------------------------------------------------------
-    # Unique / distinct.
+    # UNIQUE / DISTINCT
     # --------------------------------------------------------
 
     if any(
-        x in q
-        for x in (
+        phrase in q
+        for phrase in (
             "unique",
             "distinct",
             "different ",
-            "unique customers",
-            "distinct customers",
         )
     ):
+
         column = _unique_column(
             question,
             df,
         )
 
         if filtered:
+
             return {
-                "operation": "filtered_unique_count",
+                "operation":
+                    "filtered_unique_count",
                 "filters": filters,
                 "value_column": column,
             }
 
         return {
-            "operation": "calculate_unique_count",
+            "operation":
+                "calculate_unique_count",
             "column": column,
         }
 
     # --------------------------------------------------------
-    # Count.
+    # COUNT
     # --------------------------------------------------------
 
     if any(
-        x in q
-        for x in (
+        phrase in q
+        for phrase in (
             "how many",
             "count",
             "number of",
             "record count",
+            "number of rows",
+            "rows",
         )
     ):
+
         column = _count_column(
             question,
             df,
         )
 
         if filtered:
+
             return {
-                "operation": "filtered_count",
+                "operation":
+                    "filtered_count",
                 "filters": filters,
                 "count_column": column,
             }
 
         return {
-            "operation": "calculate_count",
+            "operation":
+                "calculate_count",
             "column": column,
         }
 
     # --------------------------------------------------------
-    # Average.
+    # AVERAGE
     # --------------------------------------------------------
 
     if any(
-        x in q
-        for x in (
+        phrase in q
+        for phrase in (
             "average",
             "avg",
             "mean",
         )
     ):
+
         value = _value_column(
             question,
             df,
@@ -1710,41 +2266,64 @@ def deterministic_plan(
 
         if not value:
             raise ValueError(
-                "Could not determine the average column."
+                "Could not determine "
+                "the average column."
             )
 
         if filtered:
+
             return {
-                "operation": "filtered_average",
+                "operation":
+                    "filtered_average",
                 "filters": filters,
                 "value_column": value,
             }
 
+        if grouping_intent:
+
+            group = _group_column(
+                question,
+                df,
+            )
+
+            if group:
+
+                return {
+                    "operation":
+                        "group_and_average",
+                    "group_column": group,
+                    "value_column": value,
+                }
+
         return {
-            "operation": "calculate_average",
+            "operation":
+                "calculate_average",
             "column": value,
         }
 
     # --------------------------------------------------------
-    # Minimum.
+    # MINIMUM
     # --------------------------------------------------------
 
     if any(
-        x in q
-        for x in (
+        phrase in q
+        for phrase in (
             "minimum",
             "minimum value",
             "lowest value",
             "smallest value",
             "lowest",
+            "least",
         )
     ):
+
         value = _value_column(
             question,
             df,
         )
 
         if value:
+
             return {
                 "operation": (
                     "filtered_min"
@@ -1752,35 +2331,47 @@ def deterministic_plan(
                     else "calculate_min"
                 ),
                 **(
-                    {"filters": filters}
+                    {
+                        "filters": filters
+                    }
                     if filtered
                     else {}
                 ),
                 **(
-                    {"value_column": value}
+                    {
+                        "value_column": value
+                    }
                     if filtered
-                    else {"column": value}
+                    else {
+                        "column": value
+                    }
                 ),
             }
 
     # --------------------------------------------------------
-    # Maximum.
+    # MAXIMUM
     # --------------------------------------------------------
 
     if any(
-        x in q
-        for x in (
+        phrase in q
+        for phrase in (
             "maximum value",
             "highest value",
             "largest value",
+            "maximum",
+            "highest",
+            "largest",
+            "greatest",
         )
     ):
+
         value = _value_column(
             question,
             df,
         )
 
         if value:
+
             return {
                 "operation": (
                     "filtered_max"
@@ -1788,31 +2379,39 @@ def deterministic_plan(
                     else "calculate_max"
                 ),
                 **(
-                    {"filters": filters}
+                    {
+                        "filters": filters
+                    }
                     if filtered
                     else {}
                 ),
                 **(
-                    {"value_column": value}
+                    {
+                        "value_column": value
+                    }
                     if filtered
-                    else {"column": value}
+                    else {
+                        "column": value
+                    }
                 ),
             }
 
     # --------------------------------------------------------
-    # Value frequency.
+    # VALUE FREQUENCY
     # --------------------------------------------------------
 
     if any(
-        x in q
-        for x in (
+        phrase in q
+        for phrase in (
             "frequency",
             "frequencies",
             "distribution",
             "most common",
             "value counts",
+            "how often",
         )
     ):
+
         column = _find_column(
             question,
             get_dataset_columns(df),
@@ -1827,6 +2426,7 @@ def deterministic_plan(
         )
 
         if column:
+
             return {
                 "operation": (
                     "filtered_value_counts"
@@ -1834,7 +2434,9 @@ def deterministic_plan(
                     else "value_counts"
                 ),
                 **(
-                    {"filters": filters}
+                    {
+                        "filters": filters
+                    }
                     if filtered
                     else {}
                 ),
@@ -1842,12 +2444,12 @@ def deterministic_plan(
             }
 
     # --------------------------------------------------------
-    # Grouped operations.
+    # GROUPED OPERATIONS
     # --------------------------------------------------------
 
-    if any(
-        x in q
-        for x in (
+    if grouping_intent or any(
+        phrase in q
+        for phrase in (
             "by city",
             "by product",
             "by category",
@@ -1859,6 +2461,7 @@ def deterministic_plan(
             "grouped",
         )
     ):
+
         group = _group_column(
             question,
             df,
@@ -1870,10 +2473,12 @@ def deterministic_plan(
         )
 
         if group and value:
+
             if (
                 "average" in q
                 or "mean" in q
             ):
+
                 return {
                     "operation": (
                         "filtered_group_and_average"
@@ -1881,7 +2486,9 @@ def deterministic_plan(
                         else "group_and_average"
                     ),
                     **(
-                        {"filters": filters}
+                        {
+                            "filters": filters
+                        }
                         if filtered
                         else {}
                     ),
@@ -1896,7 +2503,9 @@ def deterministic_plan(
                     else "group_and_sum"
                 ),
                 **(
-                    {"filters": filters}
+                    {
+                        "filters": filters
+                    }
                     if filtered
                     else {}
                 ),
@@ -1905,12 +2514,12 @@ def deterministic_plan(
             }
 
     # --------------------------------------------------------
-    # Sum / total.
+    # SUM / TOTAL
     # --------------------------------------------------------
 
     if any(
-        x in q
-        for x in (
+        phrase in q
+        for phrase in (
             "total",
             "sum",
             "revenue",
@@ -1922,6 +2531,7 @@ def deterministic_plan(
             "total profit",
         )
     ):
+
         value = _value_column(
             question,
             df,
@@ -1929,51 +2539,41 @@ def deterministic_plan(
 
         if not value:
             raise ValueError(
-                "Could not determine the numeric column."
+                "Could not determine "
+                "the numeric column."
             )
 
         if filtered:
+
             return {
-                "operation": "filtered_sum",
+                "operation":
+                    "filtered_sum",
                 "filters": filters,
                 "value_column": value,
             }
 
         return {
-            "operation": "calculate_sum",
+            "operation":
+                "calculate_sum",
             "column": value,
         }
 
     raise ValueError(
-        "Could not determine an analysis operation "
-        "from the question."
+        "Could not determine an analysis "
+        "operation from the question."
     )
-
-
-def _extract_n(
-    question: str,
-    default: int = 5,
-) -> int:
-    """Extract N from top/first/best/highest/bottom N."""
-    match = re.search(
-        r"\b(?:top|first|best|highest|bottom)\s+(\d+)\b",
-        question,
-        re.IGNORECASE,
-    )
-
-    return max(1, int(match[1])) if match else default
-    
 
 
 # ============================================================
-# OPTIONAL GEMINI FALLBACK
+# OPTIONAL GEMINI PLANNER
 # ============================================================
 
 def _gemini_plan(
     question: str,
     profile: Dict[str, Any],
 ) -> Dict[str, Any]:
-    """Ask Gemini for a plan only when explicitly enabled."""
+    """Ask Gemini for a plan only when enabled."""
+
     if not USE_GEMINI or client is None:
         raise RuntimeError(
             "Gemini fallback is disabled."
@@ -1982,26 +2582,54 @@ def _gemini_plan(
     prompt = f"""
 Return exactly one JSON analysis plan.
 
-Question:
-
+USER QUESTION:
 {question}
 
-Dataset profile:
-
+DATASET PROFILE:
 {json.dumps(profile, indent=2, default=str)}
 
-Supported operations:
+SUPPORTED OPERATIONS:
+{json.dumps(
+    sorted(SUPPORTED_OPERATIONS),
+    indent=2,
+)}
 
-{json.dumps(sorted(SUPPORTED_OPERATIONS))}
+RULES:
 
-Rules:
+1. Use only actual dataset columns.
 
-- Use only actual columns.
-- Filters must contain column, operator and value.
-- Equality uses "=".
-- Do not invent values.
-- Do not calculate.
-- Return JSON only.
+2. Never invent column names.
+
+3. Never invent filter values.
+
+4. Filters must contain:
+   column
+   operator
+   value
+
+5. Equality uses "=".
+
+6. Supported filter operators:
+   =
+   !=
+   >
+   >=
+   <
+   <=
+   contains
+   between
+
+7. Do not calculate any result.
+
+8. Return JSON only.
+
+9. For top_n and filtered_top_n,
+   n must be an integer.
+
+10. For filtered operations,
+    all conditions must be inside filters.
+
+11. Return exactly one operation.
 """
 
     response = client.models.generate_content(
@@ -2014,17 +2642,25 @@ Rules:
     )
 
 
+# ============================================================
+# CHOOSE ANALYSIS
+# ============================================================
+
 def choose_analysis(
     question: str,
-    profile: Optional[Dict[str, Any]],
-    df: Optional[pd.DataFrame] = None,
+    profile: Optional[
+        Dict[str, Any]
+    ],
+    df: Optional[
+        pd.DataFrame
+    ] = None,
 ) -> Dict[str, Any]:
     """
-    Deterministic first, Gemini only as an opt-in fallback.
+    Deterministic first.
 
-    The real DataFrame is required because deterministic planning
-    uses the actual column names and actual dataset values.
+    Gemini is only an optional fallback.
     """
+
     if not question or not question.strip():
         raise ValueError(
             "Question cannot be empty."
@@ -2032,15 +2668,17 @@ def choose_analysis(
 
     if df is None:
         raise ValueError(
-            "choose_analysis requires the real DataFrame."
+            "choose_analysis requires "
+            "the real DataFrame."
         )
 
-    profile = normalize_profile(
+    normalized_profile = normalize_profile(
         df,
         profile,
     )
 
     try:
+
         plan = deterministic_plan(
             question,
             df,
@@ -2048,32 +2686,39 @@ def choose_analysis(
 
         return validate_plan(
             plan,
-            profile,
+            normalized_profile,
         )
 
     except Exception as deterministic_error:
+
         if not USE_GEMINI or client is None:
             raise ValueError(
-                "Could not understand the question locally: "
+                "Could not understand the "
+                "question locally: "
                 f"{deterministic_error}"
             ) from deterministic_error
 
         try:
+
             plan = _gemini_plan(
                 question,
-                profile,
+                normalized_profile,
             )
 
             return validate_plan(
                 plan,
-                profile,
+                normalized_profile,
             )
 
         except Exception as gemini_error:
+
             raise ValueError(
-                "Could not create a valid analysis plan. "
-                f"Local planner: {deterministic_error}; "
-                f"Gemini fallback: {gemini_error}"
+                "Could not create a valid "
+                "analysis plan. "
+                f"Local planner: "
+                f"{deterministic_error}; "
+                f"Gemini fallback: "
+                f"{gemini_error}"
             ) from gemini_error
 
 
@@ -2085,141 +2730,225 @@ def execute_analysis(
     df: pd.DataFrame,
     plan: Dict[str, Any],
 ) -> Any:
-    """Execute a validated analysis plan."""
+    """
+    Execute a validated analysis plan.
+
+    Python performs all actual calculations.
+    """
+
+    validate_dataframe(df)
+
     plan = normalize_plan(
         df,
         plan,
     )
 
-    op = plan["operation"]
+    operation = plan[
+        "operation"
+    ]
 
-    if op == "calculate_sum":
+    # --------------------------------------------------------
+    # BASIC OPERATIONS
+    # --------------------------------------------------------
+
+    if operation == "calculate_sum":
+
         return calculate_sum(
             df,
             plan["column"],
         )
 
-    if op == "calculate_average":
+    if operation == "calculate_average":
+
         return calculate_average(
             df,
             plan["column"],
         )
 
-    if op == "calculate_count":
+    if operation == "calculate_count":
+
         return calculate_count(
             df,
             plan["column"],
         )
 
-    if op == "calculate_unique_count":
+    if operation == "calculate_unique_count":
+
         return calculate_unique_count(
             df,
             plan["column"],
         )
 
-    if op == "calculate_min":
+    if operation == "calculate_min":
+
         return calculate_min(
             df,
             plan["column"],
         )
 
-    if op == "calculate_max":
+    if operation == "calculate_max":
+
         return calculate_max(
             df,
             plan["column"],
         )
 
-    if op == "group_and_sum":
+    # --------------------------------------------------------
+    # GROUP OPERATIONS
+    # --------------------------------------------------------
+
+    if operation == "group_and_sum":
+
         return group_and_sum(
             df,
             plan["group_column"],
             plan["value_column"],
         )
 
-    if op == "group_and_average":
+    if operation == "group_and_average":
+
         return group_and_average(
             df,
             plan["group_column"],
             plan["value_column"],
         )
 
-    if op == "group_and_count":
+    if operation == "group_and_count":
+
         return group_and_count(
             df,
             plan["group_column"],
         )
 
-    if op == "top_n":
+    # --------------------------------------------------------
+    # TOP N
+    # --------------------------------------------------------
+
+    if operation == "top_n":
+
         return top_n(
             df,
             plan["group_column"],
             plan["value_column"],
-            plan.get("n", 5),
+            plan.get(
+                "n",
+                5,
+            ),
         )
 
-    if op == "percentage_of_total":
+    # --------------------------------------------------------
+    # PERCENTAGE
+    # --------------------------------------------------------
+
+    if operation == "percentage_of_total":
+
         return percentage_of_total(
             df,
             plan["group_column"],
             plan["value_column"],
         )
 
-    if op == "monthly_sum":
+    # --------------------------------------------------------
+    # MONTHLY
+    # --------------------------------------------------------
+
+    if operation == "monthly_sum":
+
         return monthly_sum(
             df,
             plan["date_column"],
             plan["value_column"],
         )
 
-    if op == "value_counts":
+    # --------------------------------------------------------
+    # VALUE COUNTS
+    # --------------------------------------------------------
+
+    if operation == "value_counts":
+
         return value_counts(
             df,
             plan["column"],
         )
 
-    if op == "filtered_sum":
+    # --------------------------------------------------------
+    # FILTERED SUM
+    # --------------------------------------------------------
+
+    if operation == "filtered_sum":
+
         return filtered_sum(
             df,
             plan["filters"],
             plan["value_column"],
         )
 
-    if op == "filtered_average":
+    # --------------------------------------------------------
+    # FILTERED AVERAGE
+    # --------------------------------------------------------
+
+    if operation == "filtered_average":
+
         return filtered_average(
             df,
             plan["filters"],
             plan["value_column"],
         )
 
-    if op == "filtered_count":
+    # --------------------------------------------------------
+    # FILTERED COUNT
+    # --------------------------------------------------------
+
+    if operation == "filtered_count":
+
         return filtered_count(
             df,
             plan["filters"],
             plan["count_column"],
         )
 
-    if op == "filtered_unique_count":
+    # --------------------------------------------------------
+    # FILTERED UNIQUE COUNT
+    # --------------------------------------------------------
+
+    if operation == "filtered_unique_count":
+
         return filtered_unique_count(
             df,
             plan["filters"],
             plan["value_column"],
         )
 
-    if op == "filtered_min":
+    # --------------------------------------------------------
+    # FILTERED MIN
+    # --------------------------------------------------------
+
+    if operation == "filtered_min":
+
         return filtered_min(
             df,
             plan["filters"],
             plan["value_column"],
         )
 
-    if op == "filtered_max":
+    # --------------------------------------------------------
+    # FILTERED MAX
+    # --------------------------------------------------------
+
+    if operation == "filtered_max":
+
         return filtered_max(
             df,
             plan["filters"],
             plan["value_column"],
         )
 
-    if op == "filtered_group_and_sum":
+    # --------------------------------------------------------
+    # FILTERED GROUP SUM
+    # --------------------------------------------------------
+
+    if operation == "filtered_group_and_sum":
+
         return filtered_group_and_sum(
             df,
             plan["filters"],
@@ -2227,7 +2956,12 @@ def execute_analysis(
             plan["value_column"],
         )
 
-    if op == "filtered_group_and_average":
+    # --------------------------------------------------------
+    # FILTERED GROUP AVERAGE
+    # --------------------------------------------------------
+
+    if operation == "filtered_group_and_average":
+
         return filtered_group_and_average(
             df,
             plan["filters"],
@@ -2235,281 +2969,219 @@ def execute_analysis(
             plan["value_column"],
         )
 
-    if op == "filtered_value_counts":
+    # --------------------------------------------------------
+    # FILTERED VALUE COUNTS
+    # --------------------------------------------------------
+
+    if operation == "filtered_value_counts":
+
         return filtered_value_counts(
             df,
             plan["filters"],
             plan["column"],
         )
 
-    if op == "filtered_top_n":
+    # --------------------------------------------------------
+    # FILTERED TOP N
+    # --------------------------------------------------------
+
+    if operation == "filtered_top_n":
+
         return filtered_top_n(
             df,
             plan["filters"],
             plan["group_column"],
             plan["value_column"],
-            plan.get("n", 5),
+            plan.get(
+                "n",
+                5,
+            ),
         )
 
     raise ValueError(
-        f"Unsupported operation: {op}"
+        f"Unsupported operation: "
+        f"{operation}"
     )
 
 
-# Older project code may call this name.
-execute_plan = execute_analysis
-
-
 # ============================================================
-# DETERMINISTIC EXPLANATION
+# LOCAL RESULT EXPLANATION
 # ============================================================
 
-def _fmt(value: Any) -> str:
-    """Format numeric results cleanly."""
-    value = serialize_result(value)
-
-    if isinstance(value, bool):
-        return str(value)
-
-    if isinstance(value, int):
-        return f"{value:,}"
-
-    if isinstance(value, float):
-        return f"{int(value):,}" if value.is_integer() else f"{value:,.2f}"
-    return str(value)
-
-
-def _filters_text(
-    plan: Dict[str, Any],
-) -> str:
-    """Convert filters into readable text."""
-    parts: List[str] = []
-
-    for filter_item in plan.get(
-        "filters",
-        [],
-    ):
-        value = filter_item["value"]
-
-        if filter_item["operator"] == "between":
-            value = (
-                f"{value[0]} and {value[1]}"
-            )
-
-        parts.append(
-            f"{filter_item['column']} "
-            f"{filter_item['operator']} "
-            f"{value}"
-        )
-
-    return "; ".join(parts)
-
-
-def _explain(
+def _local_explanation(
     question: str,
     plan: Dict[str, Any],
     result: Any,
 ) -> str:
-    """Generate a deterministic explanation."""
-    del question
+    """
+    Produce a safe fallback explanation
+    without requiring Gemini.
+    """
 
-    op = plan["operation"]
-    result = serialize_result(result)
+    operation = plan.get(
+        "operation",
+        "",
+    )
 
-    if op in {
+    data = serialize_result(
+        result
+    )
+
+    if operation in {
         "calculate_sum",
         "filtered_sum",
     }:
-        column = plan.get(
-            "column",
-            plan.get("value_column"),
+        value_column = plan.get(
+            "column"
+        ) or plan.get(
+            "value_column"
         )
 
-        text = (
-            f"The total {column} "
-            f"is {_fmt(result)}."
-        )
-
-        if op == "filtered_sum":
-            text += (
-                f" Filtered for "
-                f"{_filters_text(plan)}."
+        if operation == "filtered_sum":
+            return (
+                f"The total of "
+                f"{value_column} "
+                f"for the requested "
+                f"conditions is "
+                f"{data}."
             )
 
-        return text
+        return (
+            f"The total of "
+            f"{value_column} is "
+            f"{data}."
+        )
 
-    if op in {
+    if operation in {
         "calculate_average",
         "filtered_average",
     }:
-        column = plan.get(
-            "column",
-            plan.get("value_column"),
+        value_column = plan.get(
+            "column"
+        ) or plan.get(
+            "value_column"
         )
 
-        text = (
-            f"The average {column} "
-            f"is {_fmt(result)}."
-        )
-
-        if op == "filtered_average":
-            text += (
-                f" Filtered for "
-                f"{_filters_text(plan)}."
+        if operation == "filtered_average":
+            return (
+                f"The average of "
+                f"{value_column} "
+                f"for the requested "
+                f"conditions is "
+                f"{data}."
             )
 
-        return text
+        return (
+            f"The average of "
+            f"{value_column} is "
+            f"{data}."
+        )
 
-    if op in {
+    if operation in {
         "calculate_count",
         "filtered_count",
     }:
-        if op == "filtered_count":
+        count_column = plan.get(
+            "column"
+        ) or plan.get(
+            "count_column"
+        )
+
+        if operation == "filtered_count":
             return (
-                f"There are {_fmt(result)} records "
-                f"matching {_filters_text(plan)}."
+                f"The number of records "
+                f"matching the requested "
+                f"conditions is {data}."
             )
 
         return (
-            f"There are {_fmt(result)} records."
+            f"The number of records "
+            f"counted in {count_column} "
+            f"is {data}."
         )
 
-    if op in {
+    if operation in {
         "calculate_unique_count",
         "filtered_unique_count",
     }:
-        column = plan.get(
-            "column",
-            plan.get("value_column"),
+        value_column = plan.get(
+            "column"
+        ) or plan.get(
+            "value_column"
         )
 
-        text = (
-            f"There are {_fmt(result)} "
-            f"unique/distinct values in {column}."
-        )
-
-        if op == "filtered_unique_count":
-            text += (
-                f" Filtered for "
-                f"{_filters_text(plan)}."
-            )
-
-        return text
-
-    if op == "calculate_min":
         return (
-            f"The minimum {plan['column']} "
-            f"is {_fmt(result)}."
+            f"There are {data} "
+            f"unique values in "
+            f"{value_column}."
         )
 
-    if op == "calculate_max":
-        return (
-            f"The maximum {plan['column']} "
-            f"is {_fmt(result)}."
-        )
-
-    if op == "filtered_min":
-        return (
-            f"The minimum "
-            f"{plan['value_column']} "
-            f"is {_fmt(result)}, "
-            f"filtered for "
-            f"{_filters_text(plan)}."
-        )
-
-    if op == "filtered_max":
-        return (
-            f"The maximum "
-            f"{plan['value_column']} "
-            f"is {_fmt(result)}, "
-            f"filtered for "
-            f"{_filters_text(plan)}."
-        )
-
-    if op in {
-        "top_n",
-        "filtered_top_n",
+    if operation in {
+        "calculate_min",
+        "filtered_min",
     }:
-        if isinstance(result, list) and result:
-            row = result[0]
+        value_column = plan.get(
+            "column"
+        ) or plan.get(
+            "value_column"
+        )
 
-            if isinstance(row, dict):
-                group = row.get(
-                    plan["group_column"]
-                )
+        return (
+            f"The minimum value of "
+            f"{value_column} is "
+            f"{data}."
+        )
 
-                value = row.get(
-                    plan["value_column"]
-                )
+    if operation in {
+        "calculate_max",
+        "filtered_max",
+    }:
+        value_column = plan.get(
+            "column"
+        ) or plan.get(
+            "value_column"
+        )
 
-                text = (
-                    f"{group} has the highest "
-                    f"{plan['value_column']}, "
-                    f"with {_fmt(value)}."
-                )
+        return (
+            f"The maximum value of "
+            f"{value_column} is "
+            f"{data}."
+        )
 
-                if op == "filtered_top_n":
-                    text += (
-                        f" Filtered for "
-                        f"{_filters_text(plan)}."
-                    )
+    if operation == "monthly_sum":
+        return (
+            "The monthly result is "
+            f"{data}."
+        )
 
-                return text
+    if operation == "percentage_of_total":
+        return (
+            "The percentage-of-total "
+            f"result is {data}."
+        )
 
-        return str(result)
-
-    if op in {
+    if operation in {
         "group_and_sum",
         "group_and_average",
         "group_and_count",
+        "top_n",
         "filtered_group_and_sum",
         "filtered_group_and_average",
-    }:
-        text = (
-            "Grouped analysis completed by "
-            f"{plan['group_column']}."
-        )
-
-        if op.startswith("filtered_"):
-            text += (
-                f" Filtered for "
-                f"{_filters_text(plan)}."
-            )
-
-        return text
-
-    if op == "percentage_of_total":
-        return (
-            "Percentage-of-total analysis completed "
-            f"by {plan['group_column']}."
-        )
-
-    if op == "monthly_sum":
-        return (
-            f"Monthly {plan['value_column']} "
-            f"analysis completed using "
-            f"{plan['date_column']}."
-        )
-
-    if op in {
+        "filtered_top_n",
         "value_counts",
         "filtered_value_counts",
     }:
-        text = (
-            f"Value frequencies for "
-            f"{plan['column']} are shown in the result."
+        return (
+            "The analysis result is "
+            f"{data}."
         )
 
-        if op == "filtered_value_counts":
-            text += (
-                f" Filtered for "
-                f"{_filters_text(plan)}."
-            )
+    return str(data)
 
-        return text
 
-    return str(result)
-
+# ============================================================
+# GEMINI RESULT EXPLANATION
+# ============================================================
 
 def explain_result(
     question: str,
@@ -2517,40 +3189,166 @@ def explain_result(
     result: Any,
 ) -> str:
     """
-    Explain a result locally.
+    Explain the actual Python result.
 
-    NEVER calls Gemini.
+    Gemini is optional. When disabled,
+    a deterministic explanation is returned.
     """
-    return _explain(
+
+    result_data = serialize_result(
+        result
+    )
+
+    if not USE_GEMINI or client is None:
+        return _local_explanation(
+            question,
+            plan,
+            result_data,
+        )
+
+    prompt = f"""
+You are an expert data analyst.
+
+Answer the user's question using ONLY
+the ACTUAL PYTHON RESULT.
+
+USER QUESTION:
+{question}
+
+ANALYSIS PLAN:
+{json.dumps(
+    plan,
+    indent=2,
+    default=str,
+)}
+
+PYTHON RESULT:
+{json.dumps(
+    result_data,
+    indent=2,
+    default=str,
+)}
+
+RULES:
+
+1. Never invent numbers.
+
+2. Use only the actual Python result.
+
+3. Be concise but useful.
+
+4. Format large numbers with commas.
+
+5. Explain the key finding.
+
+6. If the result is grouped data,
+   identify the highest relevant group
+   when that is directly evident.
+
+7. If the result is a percentage table,
+   identify the largest contribution
+   when directly evident.
+
+8. If the result is monthly data,
+   identify the highest month
+   when directly evident.
+
+9. For unique-count operations,
+   clearly say unique or distinct.
+
+10. For filtered operations,
+    mention the applied conditions.
+
+11. Do not confuse record count
+    with unique count.
+
+12. Do not mention internal prompts.
+
+13. Do not mention Gemini.
+
+14. Do not perform a new calculation.
+
+15. Return only the final natural-language answer.
+"""
+
+    try:
+
+        response = client.models.generate_content(
+            model=MODEL_NAME,
+            contents=prompt,
+        )
+
+        if (
+            response is not None
+            and getattr(
+                response,
+                "text",
+                None,
+            )
+        ):
+            return response.text.strip() # pyright: ignore[reportOptionalMemberAccess]
+
+    except Exception:
+        # Gemini explanation is optional.
+        # Never let an explanation failure
+        # destroy a successful Python analysis.
+        pass
+
+    return _local_explanation(
         question,
         plan,
-        result,
+        result_data,
     )
 
 
 # ============================================================
-# MAIN API
+# MAIN ANALYSIS PIPELINE
 # ============================================================
 
 def run_analysis(
     df: pd.DataFrame,
-    profile: Optional[Dict[str, Any]],
+    profile: Optional[
+        Dict[str, Any]
+    ],
     question: str,
 ) -> Dict[str, Any]:
     """
-    Main public function.
+    Complete AI Data Analyst pipeline.
 
-    Normal request path:
+    Flow:
 
-        deterministic planner
-            ->
-        analysis_tools
-            ->
-        local explanation
+        User Question
+              |
+              v
+        Deterministic Planner
+              |
+              v
+        Optional Gemini fallback
+              |
+              v
+        Normalize Plan
+              |
+              v
+        Validate Columns
+              |
+              v
+        Python Executes
+              |
+              v
+        Actual Result
+              |
+              v
+        Optional Explanation
+              |
+              v
+        Final Response
 
-    Therefore the normal path consumes ZERO
-    Gemini API requests.
+    Important:
+
+    Python performs the actual calculation.
+    Gemini never supplies the numeric result.
     """
+
     validate_dataframe(df)
 
     if not question or not question.strip():
@@ -2563,21 +3361,43 @@ def run_analysis(
         profile,
     )
 
+    # --------------------------------------------------------
+    # STEP 1
+    # Choose operation.
+    # --------------------------------------------------------
+
     plan = choose_analysis(
         question,
         normalized_profile,
         df=df,
     )
 
+    # --------------------------------------------------------
+    # STEP 2
+    # Normalize and validate again.
+    #
+    # This protects the execution boundary.
+    # --------------------------------------------------------
+
     plan = normalize_plan(
         df,
         plan,
     )
 
+    # --------------------------------------------------------
+    # STEP 3
+    # Execute actual Python calculation.
+    # --------------------------------------------------------
+
     result = execute_analysis(
         df,
         plan,
     )
+
+    # --------------------------------------------------------
+    # STEP 4
+    # Explain actual result.
+    # --------------------------------------------------------
 
     explanation = explain_result(
         question,
@@ -2585,146 +3405,143 @@ def run_analysis(
         result,
     )
 
+    # --------------------------------------------------------
+    # STEP 5
+    # Return structured response.
+    # --------------------------------------------------------
+
     return {
         "plan": plan,
-        "result": serialize_result(result),
+        "result": serialize_result(
+            result
+        ),
         "explanation": explanation,
     }
 
 
 # ============================================================
-# SIX-QUESTION REGRESSION TEST
+# BACKWARD-COMPATIBILITY ALIAS
 # ============================================================
 
-def run_regression_test() -> None:
-    """Run the built-in regression tests."""
-    df = pd.DataFrame(
+def execute_plan(
+    df: pd.DataFrame,
+    plan: Dict[str, Any],
+) -> Any:
+    """
+    Backward-compatible alias.
+
+    Older application code may call execute_plan().
+    """
+
+    return execute_analysis(
+        df,
+        plan,
+    )
+
+
+# ============================================================
+# SIMPLE TEST
+# ============================================================
+
+if __name__ == "__main__":
+
+    test_df = pd.DataFrame(
         {
             "City": [
                 "Delhi",
                 "Delhi",
-                "Mumbai",
                 "Mumbai",
             ],
             "Product": [
                 "Laptop",
                 "Phone",
                 "Laptop",
-                "Phone",
             ],
             "Revenue": [
                 100,
                 50,
                 200,
-                300,
-            ],
-            "Customer_ID": [
-                "C1",
-                "C2",
-                "C1",
-                "C3",
-            ],
-            "Invoice_ID": [
-                "I1",
-                "I2",
-                "I3",
-                "I4",
             ],
         }
     )
 
-    tests = [
-        (
-            "What is the total revenue in Delhi?",
-            150.0,
-        ),
-        (
-            "What is the average revenue in Mumbai?",
-            250.0,
-        ),
-        (
-            "How many invoices are in Delhi?",
-            2,
-        ),
-        (
-            "How many unique customers are in Delhi?",
-            2,
-        ),
-        (
-            "Which city has the highest revenue?",
-            "Mumbai",
-        ),
-        (
-            "What is the total revenue in Delhi for Laptop?",
-            100.0,
-        ),
+    test_profile = build_profile(
+        test_df
+    )
+
+    test_questions = [
+        "What is the total revenue?",
+        "What is the total revenue in Delhi?",
+        "What is the total revenue in Delhi for Laptop?",
+        "What is the average revenue?",
+        "How many orders are in Delhi?",
+        "How many unique customers are in Delhi?",
+        "What is the revenue by city?",
+        "What is the highest revenue?",
+        "What is the highest revenue by city?",
+        "What are the top 2 cities by revenue?",
+        "What is the frequency of products?",
     ]
 
-    print("=" * 70)
-    print("LOCAL ANALYST REGRESSION TEST")
-    print("Gemini enabled:", USE_GEMINI)
-    print("=" * 70)
+    for test_question in test_questions:
 
-    for question, expected in tests:
-        output = run_analysis(
-            df,
-            None,
-            question,
+        print(
+            "\n"
+            + "=" * 70
         )
 
-        result = output["result"]
+        print(
+            "QUESTION:"
+        )
 
-        if isinstance(expected, str):
-            if not isinstance(result, list) or not result:
-                raise AssertionError(
-                    f"\nQuestion: {question}\n"
-                    f"Expected: {expected!r}\n"
-                    f"Actual: {result!r}\n"
-                    f"Plan: {output['plan']}"
-                )
+        print(
+            test_question
+        )
 
-            first_row = result[0]
+        try:
 
-            if not isinstance(first_row, dict):
-                raise AssertionError(
-                    f"\nQuestion: {question}\n"
-                    f"Expected a row dictionary.\n"
-                    f"Actual: {result!r}\n"
-                    f"Plan: {output['plan']}"
-                )
-
-            actual = first_row.get("City")
-
-        else:
-            actual = result
-
-        if actual != expected:
-            raise AssertionError(
-                f"\nQuestion: {question}\n"
-                f"Expected: {expected!r}\n"
-                f"Actual: {actual!r}\n"
-                f"Plan: {output['plan']}"
+            output = run_analysis(
+                test_df,
+                test_profile,
+                test_question,
             )
 
-        print()
-        print("QUESTION:", question)
-        print("PLAN:", output["plan"])
-        print("RESULT:", result)
-        print(
-            "EXPLANATION:",
-            output["explanation"],
-        )
+            print(
+                "\nPLAN:"
+            )
 
-    print()
-    print("=" * 70)
-    print("ALL SIX TESTS PASSED")
-    print("Gemini API requests required: 0")
-    print("=" * 70)
+            print(
+                json.dumps(
+                    output["plan"],
+                    indent=2,
+                    default=str,
+                )
+            )
 
+            print(
+                "\nRESULT:"
+            )
 
-# ============================================================
-# ENTRY POINT
-# ============================================================
+            print(
+                json.dumps(
+                    output["result"],
+                    indent=2,
+                    default=str,
+                )
+            )
 
-if __name__ == "__main__":
-    run_regression_test()
+            print(
+                "\nEXPLANATION:"
+            )
+
+            print(
+                output["explanation"]
+            )
+
+        except Exception as exc:
+
+            print(
+                "\nERROR:"
+            )
+
+            print(exc)
