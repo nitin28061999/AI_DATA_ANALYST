@@ -1,9 +1,11 @@
-# analysis_tools.py
-
 from __future__ import annotations
 
-import pandas as pd
+import contextlib
+import numbers
+from typing import Any
+
 import numpy as np
+import pandas as pd
 
 
 # ============================================================
@@ -22,13 +24,13 @@ def validate_dataframe(df: pd.DataFrame) -> None:
 
 def validate_column(
     df: pd.DataFrame,
-    column: str
+    column: str,
 ) -> None:
     """Validate that a column exists."""
 
     validate_dataframe(df)
 
-    if column is None or not column.strip():
+    if not isinstance(column, str) or not column.strip():
         raise ValueError("Column name cannot be empty.")
 
     if column not in df.columns:
@@ -40,7 +42,7 @@ def validate_column(
 
 def validate_numeric_column(
     df: pd.DataFrame,
-    column: str
+    column: str,
 ) -> None:
     """Validate that a column exists and is numeric."""
 
@@ -71,28 +73,14 @@ SUPPORTED_OPERATORS = {
 
 def validate_filters(
     df: pd.DataFrame,
-    filters: list
+    filters: list,
 ) -> None:
     """
-    Validate filters.
+    Validate a list of filters.
 
-    IMPORTANT:
-    Missing operator is intentionally allowed and treated as "=".
+    Filters use AND logic.
 
-    This makes the analysis engine compatible with plans such as:
-
-        {
-            "column": "City",
-            "value": "Delhi"
-        }
-
-    and also:
-
-        {
-            "column": "City",
-            "operator": "=",
-            "value": "Delhi"
-        }
+    Missing operator defaults to "=".
     """
 
     validate_dataframe(df)
@@ -124,38 +112,25 @@ def validate_filters(
 
         validate_column(
             df,
-            column
+            column,
         )
-
-        # ----------------------------------------------------
-        # Missing operator means equality.
-        # ----------------------------------------------------
 
         operator = filter_item.get(
             "operator",
-            "="
+            "=",
         )
 
-        if operator is None:
-            operator = "="
+        operator = _normalize_operator(operator)
 
-        if not isinstance(operator, str):
-            raise ValueError(
-                f"Filter #{index + 1} operator must be a string."
-            )
-
-        operator = operator.strip().lower()
-
-        if operator not in SUPPORTED_OPERATORS:
+        if operator not in {
+            _normalize_operator(item)
+            for item in SUPPORTED_OPERATORS
+        }:
             raise ValueError(
                 f"Unsupported filter operator '{operator}'. "
                 f"Supported operators: "
                 f"{sorted(SUPPORTED_OPERATORS)}"
             )
-
-        # ----------------------------------------------------
-        # Validate BETWEEN
-        # ----------------------------------------------------
 
         if operator == "between":
 
@@ -163,7 +138,7 @@ def validate_filters(
 
             if not isinstance(
                 value,
-                (list, tuple)
+                (list, tuple),
             ):
                 raise ValueError(
                     "The 'between' operator requires "
@@ -182,47 +157,63 @@ def validate_filters(
 # ============================================================
 
 def _normalize_operator(
-    operator
+    operator: Any,
 ) -> str:
-    """Normalize operator."""
+    """Normalize a filter operator."""
 
     if operator is None:
         return "="
 
-    operator = str(
+    normalized = str(
         operator
     ).strip().lower()
 
-    return "=" if operator == "==" else operator
+    return "=" if normalized == "==" else normalized
 
 
 def _convert_value_for_series(
     series: pd.Series,
-    value
-):
-    """Convert filter values to compatible pandas types."""
+    value: Any,
+) -> Any:
+    """
+    Convert a filter value to a type compatible
+    with the pandas Series.
+    """
 
     if pd.api.types.is_numeric_dtype(series):
 
         try:
             return pd.to_numeric(value)
-        except (
-            ValueError,
-            TypeError
-        ):
+        except (ValueError, TypeError):
             return value
 
     if pd.api.types.is_datetime64_any_dtype(series):
 
         try:
             return pd.to_datetime(value)
-        except (
-            ValueError,
-            TypeError
-        ):
+        except (ValueError, TypeError):
             return value
 
     return value
+
+
+def _is_text_series(
+    series: pd.Series,
+) -> bool:
+    """Return True when a Series should be treated as text."""
+
+    return (
+        pd.api.types.is_string_dtype(series)
+        or pd.api.types.is_object_dtype(series)
+    )
+
+
+def _text_normalize(
+    value: Any,
+) -> str:
+    """Normalize a value for case-insensitive text comparison."""
+
+    return "" if value is None else str(value).strip().casefold()
 
 
 # ============================================================
@@ -231,46 +222,33 @@ def _convert_value_for_series(
 
 def apply_filters(
     df: pd.DataFrame,
-    filters: list
+    filters: list,
 ) -> pd.DataFrame:  # sourcery skip: low-code-quality
     """
     Apply multiple filters using AND logic.
 
-    Missing operator defaults to "=".
+    Supported operators:
 
-    Examples:
-
-        [
-            {
-                "column": "City",
-                "value": "Delhi"
-            }
-        ]
-
-    or:
-
-        [
-            {
-                "column": "City",
-                "operator": "=",
-                "value": "Delhi"
-            },
-            {
-                "column": "Revenue",
-                "operator": ">",
-                "value": 1000
-            }
-        ]
+        =
+        ==
+        !=
+        >
+        >=
+        <
+        <=
+        contains
+        between
     """
 
     validate_filters(
         df,
-        filters
+        filters,
     )
 
     mask = pd.Series(
         True,
-        index=df.index
+        index=df.index,
+        dtype=bool,
     )
 
     for filter_item in filters:
@@ -280,7 +258,7 @@ def apply_filters(
         operator = _normalize_operator(
             filter_item.get(
                 "operator",
-                "="
+                "=",
             )
         )
 
@@ -294,35 +272,45 @@ def apply_filters(
 
         if operator == "=":
 
-            converted_value = (
-                _convert_value_for_series(
-                    series,
-                    value
-                )
+            converted_value = _convert_value_for_series(
+                series,
+                value,
             )
 
-            # Case-insensitive equality for text.
-            if (
-                pd.api.types.is_string_dtype(series)
-                or series.dtype == object
-            ):
+            if _is_text_series(series):
+
                 current_mask = (
-                    series.astype(str)
+                    series.astype("string")
                     .str.strip()
                     .str.casefold()
-                    ==
-                    str(converted_value)
-                    .strip()
-                    .casefold()
+                    == _text_normalize(
+                        converted_value
+                    )
                 )
 
-                # Preserve NaN behavior.
-                current_mask = current_mask & series.notna()
+                current_mask = (
+                    current_mask
+                    & series.notna()
+                )
 
             else:
-                current_mask = (
-                    series == converted_value
-                )
+
+                try:
+
+                    current_mask = (
+                        series == converted_value
+                    )
+
+                except (
+                    TypeError,
+                    ValueError,
+                ) as exc:
+
+                    raise ValueError(
+                        f"Cannot compare column "
+                        f"'{column}' with value "
+                        f"'{value}'."
+                    ) from exc
 
         # ====================================================
         # NOT EQUAL
@@ -330,33 +318,47 @@ def apply_filters(
 
         elif operator == "!=":
 
-            converted_value = (
-                _convert_value_for_series(
-                    series,
-                    value
-                )
+            converted_value = _convert_value_for_series(
+                series,
+                value,
             )
 
-            if (
-                pd.api.types.is_string_dtype(series)
-                or series.dtype == object
-            ):
+            if _is_text_series(series):
+
                 current_mask = (
-                    series.astype(str)
+                    series.astype("string")
                     .str.strip()
                     .str.casefold()
-                    !=
-                    str(converted_value)
-                    .strip()
-                    .casefold()
+                    != _text_normalize(
+                        converted_value
+                    )
                 )
-
-                current_mask = current_mask & series.notna()
 
             else:
-                current_mask = (
-                    series != converted_value
-                )
+
+                try:
+
+                    current_mask = (
+                        series != converted_value
+                    )
+
+                except (
+                    TypeError,
+                    ValueError,
+                ) as exc:
+
+                    raise ValueError(
+                        f"Cannot compare column "
+                        f"'{column}' with value "
+                        f"'{value}'."
+                    ) from exc
+
+            # Missing values do not count as
+            # matches for !=.
+            current_mask = (
+                current_mask
+                & series.notna()
+            )
 
         # ====================================================
         # GREATER THAN
@@ -364,21 +366,26 @@ def apply_filters(
 
         elif operator == ">":
 
-            converted_value = (
-                _convert_value_for_series(
-                    series,
-                    value
-                )
+            converted_value = _convert_value_for_series(
+                series,
+                value,
             )
 
             try:
+
                 current_mask = (
                     series > converted_value
                 )
-            except TypeError as exc:
+
+            except (
+                TypeError,
+                ValueError,
+            ) as exc:
+
                 raise ValueError(
                     f"Cannot apply '>' to column "
-                    f"'{column}' with value '{value}'."
+                    f"'{column}' with value "
+                    f"'{value}'."
                 ) from exc
 
         # ====================================================
@@ -387,21 +394,26 @@ def apply_filters(
 
         elif operator == ">=":
 
-            converted_value = (
-                _convert_value_for_series(
-                    series,
-                    value
-                )
+            converted_value = _convert_value_for_series(
+                series,
+                value,
             )
 
             try:
+
                 current_mask = (
                     series >= converted_value
                 )
-            except TypeError as exc:
+
+            except (
+                TypeError,
+                ValueError,
+            ) as exc:
+
                 raise ValueError(
                     f"Cannot apply '>=' to column "
-                    f"'{column}' with value '{value}'."
+                    f"'{column}' with value "
+                    f"'{value}'."
                 ) from exc
 
         # ====================================================
@@ -410,21 +422,26 @@ def apply_filters(
 
         elif operator == "<":
 
-            converted_value = (
-                _convert_value_for_series(
-                    series,
-                    value
-                )
+            converted_value = _convert_value_for_series(
+                series,
+                value,
             )
 
             try:
+
                 current_mask = (
                     series < converted_value
                 )
-            except TypeError as exc:
+
+            except (
+                TypeError,
+                ValueError,
+            ) as exc:
+
                 raise ValueError(
                     f"Cannot apply '<' to column "
-                    f"'{column}' with value '{value}'."
+                    f"'{column}' with value "
+                    f"'{value}'."
                 ) from exc
 
         # ====================================================
@@ -433,21 +450,26 @@ def apply_filters(
 
         elif operator == "<=":
 
-            converted_value = (
-                _convert_value_for_series(
-                    series,
-                    value
-                )
+            converted_value = _convert_value_for_series(
+                series,
+                value,
             )
 
             try:
+
                 current_mask = (
                     series <= converted_value
                 )
-            except TypeError as exc:
+
+            except (
+                TypeError,
+                ValueError,
+            ) as exc:
+
                 raise ValueError(
                     f"Cannot apply '<=' to column "
-                    f"'{column}' with value '{value}'."
+                    f"'{column}' with value "
+                    f"'{value}'."
                 ) from exc
 
         # ====================================================
@@ -457,12 +479,12 @@ def apply_filters(
         elif operator == "contains":
 
             current_mask = (
-                series.astype(str)
+                series.astype("string")
                 .str.contains(
                     str(value),
                     case=False,
                     na=False,
-                    regex=False
+                    regex=False,
                 )
             )
 
@@ -472,14 +494,29 @@ def apply_filters(
 
         elif operator == "between":
 
+            if not isinstance(
+                value,
+                (list, tuple),
+            ):
+                raise ValueError(
+                    "The 'between' operator requires "
+                    "exactly two values."
+                )
+
+            if len(value) != 2:
+                raise ValueError(
+                    "The 'between' operator requires "
+                    "exactly two values."
+                )
+
             lower_value = _convert_value_for_series(
                 series,
-                value[0]
+                value[0],
             )
 
             upper_value = _convert_value_for_series(
                 series,
-                value[1]
+                value[1],
             )
 
             try:
@@ -487,14 +524,18 @@ def apply_filters(
                 current_mask = series.between(
                     lower_value,
                     upper_value,
-                    inclusive="both"
+                    inclusive="both",
                 )
 
-            except TypeError as exc:
+            except (
+                TypeError,
+                ValueError,
+            ) as exc:
 
                 raise ValueError(
                     f"Cannot apply 'between' to "
-                    f"column '{column}'."
+                    f"column '{column}' with values "
+                    f"'{value[0]}' and '{value[1]}'."
                 ) from exc
 
         else:
@@ -505,7 +546,7 @@ def apply_filters(
 
         mask = (
             mask
-            & current_mask.fillna(False)
+            & current_mask.fillna(False).astype(bool)
         )
 
     return df.loc[mask].copy()
@@ -517,12 +558,13 @@ def apply_filters(
 
 def calculate_sum(
     df: pd.DataFrame,
-    column: str
+    column: str,
 ) -> float:
+    """Calculate the sum of a numeric column."""
 
     validate_numeric_column(
         df,
-        column
+        column,
     )
 
     return float(
@@ -532,32 +574,36 @@ def calculate_sum(
 
 def calculate_average(
     df: pd.DataFrame,
-    column: str
+    column: str,
 ) -> float:
+    """Calculate the average of a numeric column."""
 
     validate_numeric_column(
         df,
-        column
+        column,
     )
 
-    if df[column].dropna().empty:
+    values = df[column].dropna()
+
+    if values.empty:
         raise ValueError(
             f"Column '{column}' contains no numeric values."
         )
 
     return float(
-        df[column].mean()
+        values.mean()
     )
 
 
 def calculate_count(
     df: pd.DataFrame,
-    column: str
+    column: str,
 ) -> int:
+    """Count non-null values in a column."""
 
     validate_column(
         df,
-        column
+        column,
     )
 
     return int(
@@ -567,55 +613,62 @@ def calculate_count(
 
 def calculate_unique_count(
     df: pd.DataFrame,
-    column: str
+    column: str,
 ) -> int:
+    """Count unique non-null values."""
 
     validate_column(
         df,
-        column
+        column,
     )
 
     return int(
         df[column].nunique(
-            dropna=True
+            dropna=True,
         )
     )
 
 
 def calculate_min(
     df: pd.DataFrame,
-    column: str
+    column: str,
 ):
+    """Return the minimum non-null value."""
 
     validate_column(
         df,
-        column
+        column,
     )
 
-    if df[column].dropna().empty:
+    values = df[column].dropna()
+
+    if values.empty:
         raise ValueError(
             f"Column '{column}' contains no values."
         )
 
-    return df[column].min()
+    return values.min()
 
 
 def calculate_max(
     df: pd.DataFrame,
-    column: str
+    column: str,
 ):
+    """Return the maximum non-null value."""
 
     validate_column(
         df,
-        column
+        column,
     )
 
-    if df[column].dropna().empty:
+    values = df[column].dropna()
+
+    if values.empty:
         raise ValueError(
             f"Column '{column}' contains no values."
         )
 
-    return df[column].max()
+    return values.max()
 
 
 # ============================================================
@@ -625,91 +678,164 @@ def calculate_max(
 def group_and_sum(
     df: pd.DataFrame,
     group_column: str,
-    value_column: str
+    value_column: str,
 ) -> pd.DataFrame:
+    """
+    Group by a column and calculate sums.
+
+    Special handling is included when group_column and
+    value_column are the same column.
+    """
 
     validate_column(
         df,
-        group_column
+        group_column,
     )
 
     validate_numeric_column(
         df,
-        value_column
+        value_column,
     )
+
+    # --------------------------------------------------------
+    # IMPORTANT:
+    # If both columns are identical, a normal
+    # groupby(...)[column].sum().reset_index() can cause:
+    #
+    # ValueError: cannot insert Revenue, already exists
+    #
+    # Therefore handle this case explicitly.
+    # --------------------------------------------------------
+
+    if group_column == value_column:
+
+        result = (
+            df.groupby(
+                group_column,
+                dropna=False,
+            )
+            .agg(
+                **{
+                    "Sum": (
+                        value_column,
+                        "sum",
+                    )
+                }
+            )
+            .reset_index()
+        )
+
+        return (
+            result
+            .sort_values(
+                by="Sum",
+                ascending=False,
+            )
+            .reset_index(drop=True)
+        )
 
     result = (
         df.groupby(
             group_column,
-            dropna=False
+            dropna=False,
+            as_index=False,
         )[value_column]
         .sum()
-        .reset_index()
-    )
-
-    return (
-        result
         .sort_values(
             by=value_column,
-            ascending=False
-        )
+            ascending=False,
+        ) # pyright: ignore[reportCallIssue]
         .reset_index(drop=True)
     )
+
+    return result
 
 
 def group_and_average(
     df: pd.DataFrame,
     group_column: str,
-    value_column: str
+    value_column: str,
 ) -> pd.DataFrame:
+    """
+    Group by a column and calculate averages.
+
+    Handles the case where group_column and value_column
+    are identical.
+    """
 
     validate_column(
         df,
-        group_column
+        group_column,
     )
 
     validate_numeric_column(
         df,
-        value_column
+        value_column,
     )
+
+    if group_column == value_column:
+
+        result = (
+            df.groupby(
+                group_column,
+                dropna=False,
+            )
+            .agg(
+                **{
+                    "Average": (
+                        value_column,
+                        "mean",
+                    )
+                }
+            )
+            .reset_index()
+        )
+
+        return (
+            result
+            .sort_values(
+                by="Average",
+                ascending=False,
+            )
+            .reset_index(drop=True)
+        )
 
     result = (
         df.groupby(
             group_column,
-            dropna=False
+            dropna=False,
+            as_index=False,
         )[value_column]
         .mean()
-        .reset_index()
-    )
-
-    return (
-        result
         .sort_values(
             by=value_column,
-            ascending=False
-        )
+            ascending=False,
+        ) # pyright: ignore[reportCallIssue]
         .reset_index(drop=True)
     )
+
+    return result
 
 
 def group_and_count(
     df: pd.DataFrame,
-    group_column: str
+    group_column: str,
 ) -> pd.DataFrame:
+    """Group by a column and count rows."""
 
     validate_column(
         df,
-        group_column
+        group_column,
     )
 
     result = (
         df.groupby(
             group_column,
-            dropna=False
+            dropna=False,
         )
         .size()
         .reset_index(
-            name="Count"
+            name="Count",
         )
     )
 
@@ -717,7 +843,7 @@ def group_and_count(
         result
         .sort_values(
             by="Count",
-            ascending=False
+            ascending=False,
         )
         .reset_index(drop=True)
     )
@@ -731,28 +857,32 @@ def top_n(
     df: pd.DataFrame,
     group_column: str,
     value_column: str,
-    n: int = 10
+    n: int = 10,
 ) -> pd.DataFrame:
+    """Return the top N groups ranked by summed value."""
 
     validate_column(
         df,
-        group_column
+        group_column,
     )
 
     validate_numeric_column(
         df,
-        value_column
+        value_column,
     )
 
-    try:
-        n = n
-    except (
-        ValueError,
-        TypeError
-    ) as exc:
+    if isinstance(
+        n,
+        bool,
+    ) or not isinstance(
+        n,
+        numbers.Integral,
+    ):
         raise ValueError(
             "n must be an integer."
-        ) from exc
+        )
+
+    n = n
 
     if n <= 0:
         raise ValueError(
@@ -762,7 +892,7 @@ def top_n(
     result = group_and_sum(
         df,
         group_column,
-        value_column
+        value_column,
     )
 
     return (
@@ -779,47 +909,56 @@ def top_n(
 def percentage_of_total(
     df: pd.DataFrame,
     group_column: str,
-    value_column: str
+    value_column: str,
 ) -> pd.DataFrame:
+    """Calculate each group's percentage of the total."""
 
     validate_column(
         df,
-        group_column
+        group_column,
     )
 
     validate_numeric_column(
         df,
-        value_column
+        value_column,
     )
 
+    # Handle identical group/value columns safely.
+    if group_column == value_column:
+
+        grouped = (
+            df.groupby(
+                group_column,
+                dropna=False,
+            )[value_column]
+            .sum()
+            .rename("Value")
+            .reset_index()
+        )
+
+        return _extracted_from_percentage_of_total_31(grouped, "Value")
     grouped = (
         df.groupby(
             group_column,
-            dropna=False
+            dropna=False,
+            as_index=False,
         )[value_column]
         .sum()
-        .reset_index()
     )
 
-    total = grouped[value_column].sum()
+    return _extracted_from_percentage_of_total_31(grouped, value_column)
 
-    if total == 0:
 
-        grouped["Percentage"] = 0.0
+# TODO Rename this here and in `percentage_of_total`
+def _extracted_from_percentage_of_total_31(grouped, arg1):
+    total = grouped[arg1].sum()
 
-    else:
-
-        grouped["Percentage"] = (
-            grouped[value_column]
-            / total
-            * 100
-        )
-
+    grouped["Percentage"] = 0.0 if total == 0 else grouped[arg1] / total * 100
     return (
         grouped
         .sort_values(
             by="Percentage",
-            ascending=False
+            ascending=False,
         )
         .reset_index(drop=True)
     )
@@ -832,28 +971,29 @@ def percentage_of_total(
 def monthly_sum(
     df: pd.DataFrame,
     date_column: str,
-    value_column: str
+    value_column: str,
 ) -> pd.DataFrame:
+    """Calculate monthly sums for a numeric value column."""
 
     validate_column(
         df,
-        date_column
+        date_column,
     )
 
     validate_numeric_column(
         df,
-        value_column
+        value_column,
     )
 
     working_df = df.copy()
 
     working_df[date_column] = pd.to_datetime(
         working_df[date_column],
-        errors="coerce"
+        errors="coerce",
     )
 
     working_df = working_df.dropna(
-        subset=[date_column]
+        subset=[date_column],
     )
 
     if working_df.empty:
@@ -870,14 +1010,18 @@ def monthly_sum(
 
     result = (
         working_df
-        .groupby("Month")[value_column]
+        .groupby(
+            "Month",
+            as_index=False,
+        )[value_column]
         .sum()
-        .reset_index()
     )
 
     return (
         result
-        .sort_values("Month")
+        .sort_values(
+            "Month"
+        ) # pyright: ignore[reportCallIssue]
         .reset_index(drop=True)
     )
 
@@ -888,25 +1032,27 @@ def monthly_sum(
 
 def value_counts(
     df: pd.DataFrame,
-    column: str
+    column: str,
 ) -> pd.DataFrame:
+    """Return counts for each distinct value."""
 
     validate_column(
         df,
-        column
+        column,
     )
 
     result = (
         df[column]
         .value_counts(
-            dropna=False
+            dropna=False,
         )
+        .rename("Count")
         .reset_index()
     )
 
     result.columns = [
         column,
-        "Count"
+        "Count",
     ]
 
     return result
@@ -919,18 +1065,24 @@ def value_counts(
 def filtered_sum(
     df: pd.DataFrame,
     filters: list,
-    value_column: str
+    value_column: str,
 ) -> float:
+    """Calculate a sum after applying filters."""
 
     validate_numeric_column(
         df,
-        value_column
+        value_column,
     )
 
     filtered_df = apply_filters(
         df,
-        filters
+        filters,
     )
+
+    if filtered_df.empty:
+        raise ValueError(
+            "No rows matched the specified filters."
+        )
 
     return float(
         filtered_df[value_column].sum()
@@ -940,17 +1092,18 @@ def filtered_sum(
 def filtered_average(
     df: pd.DataFrame,
     filters: list,
-    value_column: str
+    value_column: str,
 ) -> float:
+    """Calculate an average after applying filters."""
 
     validate_numeric_column(
         df,
-        value_column
+        value_column,
     )
 
     filtered_df = apply_filters(
         df,
-        filters
+        filters,
     )
 
     if filtered_df.empty:
@@ -976,60 +1129,66 @@ def filtered_average(
 def filtered_count(
     df: pd.DataFrame,
     filters: list,
-    count_column: str
+    count_column: str,
 ) -> int:
+    """Count non-null values after applying filters."""
 
     validate_column(
         df,
-        count_column
+        count_column,
     )
 
     filtered_df = apply_filters(
         df,
-        filters
+        filters,
     )
 
-    return int(
-        filtered_df[count_column].count()
-    )
+    return 0 if filtered_df.empty else int(filtered_df[count_column].count())
 
 
 def filtered_unique_count(
     df: pd.DataFrame,
     filters: list,
-    value_column: str
+    value_column: str,
 ) -> int:
+    """Count unique values after applying filters."""
 
     validate_column(
         df,
-        value_column
+        value_column,
     )
 
     filtered_df = apply_filters(
         df,
-        filters
+        filters,
     )
+
+    if filtered_df.empty:
+        return 0
 
     return int(
         filtered_df[value_column]
-        .nunique(dropna=True)
+        .nunique(
+            dropna=True
+        )
     )
 
 
 def filtered_min(
     df: pd.DataFrame,
     filters: list,
-    value_column: str
+    value_column: str,
 ):
+    """Return the minimum value after filtering."""
 
     validate_column(
         df,
-        value_column
+        value_column,
     )
 
     filtered_df = apply_filters(
         df,
-        filters
+        filters,
     )
 
     if filtered_df.empty:
@@ -1053,17 +1212,18 @@ def filtered_min(
 def filtered_max(
     df: pd.DataFrame,
     filters: list,
-    value_column: str
+    value_column: str,
 ):
+    """Return the maximum value after filtering."""
 
     validate_column(
         df,
-        value_column
+        value_column,
     )
 
     filtered_df = apply_filters(
         df,
-        filters
+        filters,
     )
 
     if filtered_df.empty:
@@ -1092,12 +1252,13 @@ def filtered_group_and_sum(
     df: pd.DataFrame,
     filters: list,
     group_column: str,
-    value_column: str
+    value_column: str,
 ) -> pd.DataFrame:
+    """Group and sum after applying filters."""
 
     filtered_df = apply_filters(
         df,
-        filters
+        filters,
     )
 
     if filtered_df.empty:
@@ -1108,7 +1269,7 @@ def filtered_group_and_sum(
     return group_and_sum(
         filtered_df,
         group_column,
-        value_column
+        value_column,
     )
 
 
@@ -1116,12 +1277,13 @@ def filtered_group_and_average(
     df: pd.DataFrame,
     filters: list,
     group_column: str,
-    value_column: str
+    value_column: str,
 ) -> pd.DataFrame:
+    """Group and average after applying filters."""
 
     filtered_df = apply_filters(
         df,
-        filters
+        filters,
     )
 
     if filtered_df.empty:
@@ -1132,19 +1294,20 @@ def filtered_group_and_average(
     return group_and_average(
         filtered_df,
         group_column,
-        value_column
+        value_column,
     )
 
 
 def filtered_value_counts(
     df: pd.DataFrame,
     filters: list,
-    column: str
+    column: str,
 ) -> pd.DataFrame:
+    """Return value counts after applying filters."""
 
     filtered_df = apply_filters(
         df,
-        filters
+        filters,
     )
 
     if filtered_df.empty:
@@ -1154,7 +1317,7 @@ def filtered_value_counts(
 
     return value_counts(
         filtered_df,
-        column
+        column,
     )
 
 
@@ -1163,12 +1326,13 @@ def filtered_top_n(
     filters: list,
     group_column: str,
     value_column: str,
-    n: int = 10
+    n: int = 10,
 ) -> pd.DataFrame:
+    """Return top N groups after applying filters."""
 
     filtered_df = apply_filters(
         df,
-        filters
+        filters,
     )
 
     if filtered_df.empty:
@@ -1180,7 +1344,7 @@ def filtered_top_n(
         filtered_df,
         group_column,
         value_column,
-        n
+        n,
     )
 
 
@@ -1189,38 +1353,103 @@ def filtered_top_n(
 # ============================================================
 
 def dataframe_to_records(
-    result
+    result: Any,
 ):
     """
-    Convert pandas results into JSON-safe Python objects.
+    Convert pandas/numpy results into JSON-safe
+    Python objects.
     """
 
-    if isinstance(result, pd.DataFrame):
+    if isinstance(
+        result,
+        pd.DataFrame,
+    ):
 
-        return result.to_dict(
-            orient="records"
+        return [
+            dataframe_to_records(row)
+            for row in result.to_dict(
+                orient="records"
+            )
+        ]
+
+    if isinstance(
+        result,
+        pd.Series,
+    ):
+
+        return {
+            str(key): dataframe_to_records(value)
+            for key, value in result.to_dict().items()
+        }
+
+    if isinstance(
+        result,
+        pd.Timestamp,
+    ):
+
+        return result.isoformat()
+
+    if isinstance(
+        result,
+        pd.Timedelta,
+    ):
+
+        return result.total_seconds()
+
+    if isinstance(
+        result,
+        np.generic,
+    ):
+
+        return dataframe_to_records(
+            result.item()
         )
 
-    if isinstance(result, pd.Series):
-
-        return result.to_dict()
-
-    if isinstance(result, np.generic):
-
-        return result.item()
-
-    if isinstance(result, dict):
+    if isinstance(
+        result,
+        dict,
+    ):
 
         return {
             str(key): dataframe_to_records(value)
             for key, value in result.items()
         }
 
-    if isinstance(result, list):
+    if isinstance(
+        result,
+        (list, tuple),
+    ):
 
         return [
             dataframe_to_records(item)
             for item in result
         ]
+
+    if isinstance(
+        result,
+        np.ndarray,
+    ):
+
+        return [
+            dataframe_to_records(item)
+            for item in result.tolist()
+        ]
+
+    if result is None:
+        return None
+
+    with contextlib.suppress(
+        TypeError,
+        ValueError,
+    ):
+
+        missing = pd.isna(result)
+
+        if isinstance(
+            missing,
+            (bool, np.bool_),
+        ) and missing:
+
+            return None
 
     return result
