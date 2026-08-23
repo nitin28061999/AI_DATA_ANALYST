@@ -17,6 +17,8 @@
         "mnesia",
         "mypy",
         "nosetests",
+        "numpy",
+        "openpyxl",
         "pipenv",
         "Pipfile",
         "pycache",

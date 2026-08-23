@@ -6,9 +6,10 @@ import contextlib
 import json
 import os
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 import pandas as pd
+from pydantic import BaseModel, Field
 
 from analysis_tools import (
     calculate_sum,
@@ -35,74 +36,129 @@ from analysis_tools import (
     filtered_value_counts,
     filtered_top_n,
 )
+class GeminiFilter(BaseModel):
+    column: str = Field(
+        description="Actual dataset column name."
+    )
 
+    operator: str = Field(
+        description=(
+            "Filter operator. Must be one of: "
+            "=, !=, >, >=, <, <=, contains, between."
+        )
+    )
+
+    value: Union[
+        str,
+        float,
+        int,
+        bool,
+        List[Any],
+    ] = Field(
+        description=(
+            "Filter value. For between, provide exactly "
+            "two values in a list."
+        )
+    )
+
+
+class GeminiPlan(BaseModel):
+    operation: str = Field(
+        description=(
+            "Analysis operation. Must be one of the "
+            "supported operations supplied in the prompt."
+        )
+    )
+
+    column: Optional[str] = Field(
+        default=None,
+        description="Dataset column used by a simple column operation.",
+    )
+
+    group_column: Optional[str] = Field(
+        default=None,
+        description="Dataset column used for grouping.",
+    )
+
+    value_column: Optional[str] = Field(
+        default=None,
+        description="Dataset numeric/value column.",
+    )
+
+    count_column: Optional[str] = Field(
+        default=None,
+        description="Dataset column used for counting.",
+    )
+
+    date_column: Optional[str] = Field(
+        default=None,
+        description="Dataset date/datetime column.",
+    )
+
+    n: Optional[int] = Field(
+        default=None,
+        description="Number of rows/groups requested for top-N operations.",
+    )
+
+    filters: Optional[List[GeminiFilter]] = Field(
+        default=None,
+        description="Optional list of dataset filters.",
+    )
 
 # ============================================================
-# OPTIONAL GEMINI
+# GEMINI CONFIGURATION
 # ============================================================
 #
-# Gemini is OFF by default.
+# Gemini is REQUIRED for this analyst.
 #
-# Normal supported questions make ZERO API calls.
+# The architecture is:
 #
-# To enable Gemini fallback:
+#     User question
+#           |
+#           v
+#     Gemini chooses the analysis plan
+#           |
+#           v
+#     Python validates the plan
+#           |
+#           v
+#     Python performs the calculation
+#           |
+#           v
+#     Gemini explains the actual result
 #
-# ANALYST_USE_GEMINI=1
-# GEMINI_API_KEY=your_key
-#
-# Optional:
-#
-# GEMINI_MODEL=gemini-3.6-flash
+# No ANALYST_USE_GEMINI switch is used.
+# A missing SDK or API key is treated as a configuration error.
 #
 # ============================================================
 
-try:
-    from dotenv import load_dotenv
+from dotenv import load_dotenv
+from google import genai
 
-    load_dotenv()
-except Exception:
-    pass
-
+load_dotenv()
 
 MODEL_NAME = os.getenv(
     "GEMINI_MODEL",
     "gemini-3.6-flash",
-)
+).strip()
 
-USE_GEMINI = (
-    os.getenv(
-        "ANALYST_USE_GEMINI",
-        "0",
+if not MODEL_NAME:
+    raise ValueError(
+        "GEMINI_MODEL cannot be empty."
     )
-    .lower()
-    in {
-        "1",
-        "true",
-        "yes",
-        "on",
-    }
+
+GEMINI_API_KEY = os.getenv(
+    "GEMINI_API_KEY"
 )
 
-client = None
+if not GEMINI_API_KEY:
+    raise ValueError(
+        "GEMINI_API_KEY is missing from the environment or .env file."
+    )
 
-if USE_GEMINI:
-    try:
-        from google import genai
-
-        api_key = os.getenv(
-            "GEMINI_API_KEY"
-        )
-
-        if api_key:
-            client = genai.Client(
-                api_key=api_key
-            )
-        else:
-            USE_GEMINI = False
-
-    except Exception:
-        USE_GEMINI = False
-        client = None
+client = genai.Client(
+    api_key=GEMINI_API_KEY
+)
 
 
 # ============================================================
@@ -182,6 +238,66 @@ FILTER_OPERATORS = {
     "<=",
     "contains",
     "between",
+}
+
+
+# Gemini structured-output schema. The schema constrains the model to
+# return a single analysis plan while Python still performs the final
+# column/operator validation against the real DataFrame.
+GEMINI_PLAN_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "operation": {
+            "type": "string",
+            "enum": sorted(SUPPORTED_OPERATIONS),
+        },
+        "column": {
+            "type": ["string", "null"],
+        },
+        "group_column": {
+            "type": ["string", "null"],
+        },
+        "value_column": {
+            "type": ["string", "null"],
+        },
+        "count_column": {
+            "type": ["string", "null"],
+        },
+        "date_column": {
+            "type": ["string", "null"],
+        },
+        "n": {
+            "type": ["integer", "null"],
+        },
+        "filters": {
+            "type": ["array", "null"],
+            "items": {
+                "type": "object",
+                "properties": {
+                    "column": {"type": "string"},
+                    "operator": {
+                        "type": "string",
+                        "enum": sorted(FILTER_OPERATORS),
+                    },
+                    "value": {
+                        "type": [
+                            "string",
+                            "number",
+                            "boolean",
+                            "array",
+                            "null",
+                        ],
+                    },
+                },
+                "required": [
+                    "column",
+                    "operator",
+                    "value",
+                ],
+            },
+        },
+    },
+    "required": ["operation"],
 }
 
 
@@ -480,10 +596,17 @@ def normalize_profile(
 
     result = dict(profile)
 
-    # Actual DataFrame columns always win.
-    result["columns"] = generated[
+    # Keep the rich column metadata supplied by data_profile.py, while
+    # exposing an authoritative list of real DataFrame column names.
+    # The actual DataFrame always wins for column validation.
+    result["column_names"] = generated[
         "columns"
     ]
+
+    if "columns" not in result:
+        result["columns"] = generated[
+            "columns"
+        ]
 
     for key, value in generated.items():
         result.setdefault(
@@ -513,8 +636,8 @@ def _profile_columns(
         )
 
     columns = profile.get(
-        "columns",
-        [],
+        "column_names",
+        profile.get("columns", []),
     )
 
     if isinstance(
@@ -529,10 +652,17 @@ def _profile_columns(
         columns,
         (list, tuple),
     ):
-        return [
-            str(column)
-            for column in columns
-        ]
+        normalized = []
+
+        for column in columns:
+            if isinstance(column, dict):
+                name = column.get("name")
+                if name is not None:
+                    normalized.append(str(name))
+            else:
+                normalized.append(str(column))
+
+        return normalized
 
     return []
 
@@ -1847,8 +1977,8 @@ def validate_plan(
 
         for filter_item in result.get(
             "filters",
-            [],
-        ):
+            
+        ) or[]:
 
             if (
                 filter_item["column"]
@@ -2565,19 +2695,14 @@ def deterministic_plan(
 
 
 # ============================================================
-# OPTIONAL GEMINI PLANNER
+# GEMINI PLANNER
 # ============================================================
 
 def _gemini_plan(
     question: str,
     profile: Dict[str, Any],
 ) -> Dict[str, Any]:
-    """Ask Gemini for a plan only when enabled."""
-
-    if not USE_GEMINI or client is None:
-        raise RuntimeError(
-            "Gemini fallback is disabled."
-        )
+    """Ask Gemini to create the analysis plan."""
 
     prompt = f"""
 Return exactly one JSON analysis plan.
@@ -2635,10 +2760,25 @@ RULES:
     response = client.models.generate_content(
         model=MODEL_NAME,
         contents=prompt,
+        config={
+            "response_mime_type": "application/json",
+            "response_schema": GeminiPlan,
+        },
     )
 
+    response_text = getattr(
+        response,
+        "text",
+        None,
+    )
+
+    if not response_text:
+        raise ValueError(
+            "Gemini returned an empty analysis plan."
+        )
+
     return extract_json(
-        response.text # pyright: ignore[reportArgumentType]
+        response_text
     )
 
 
@@ -2655,10 +2795,10 @@ def choose_analysis(
         pd.DataFrame
     ] = None,
 ) -> Dict[str, Any]:
-    """
-    Deterministic first.
+    """Create and validate an analysis plan with Gemini.
 
-    Gemini is only an optional fallback.
+    Gemini is the primary and required planner. Python remains the
+    source of truth for schema validation and all calculations.
     """
 
     if not question or not question.strip():
@@ -2668,8 +2808,7 @@ def choose_analysis(
 
     if df is None:
         raise ValueError(
-            "choose_analysis requires "
-            "the real DataFrame."
+            "choose_analysis requires the real DataFrame."
         )
 
     normalized_profile = normalize_profile(
@@ -2678,10 +2817,9 @@ def choose_analysis(
     )
 
     try:
-
-        plan = deterministic_plan(
+        plan = _gemini_plan(
             question,
-            df,
+            normalized_profile,
         )
 
         return validate_plan(
@@ -2689,37 +2827,11 @@ def choose_analysis(
             normalized_profile,
         )
 
-    except Exception as deterministic_error:
-
-        if not USE_GEMINI or client is None:
-            raise ValueError(
-                "Could not understand the "
-                "question locally: "
-                f"{deterministic_error}"
-            ) from deterministic_error
-
-        try:
-
-            plan = _gemini_plan(
-                question,
-                normalized_profile,
-            )
-
-            return validate_plan(
-                plan,
-                normalized_profile,
-            )
-
-        except Exception as gemini_error:
-
-            raise ValueError(
-                "Could not create a valid "
-                "analysis plan. "
-                f"Local planner: "
-                f"{deterministic_error}; "
-                f"Gemini fallback: "
-                f"{gemini_error}"
-            ) from gemini_error
+    except Exception as exc:
+        raise ValueError(
+            "Gemini could not create a valid analysis plan: "
+            f"{exc}"
+        ) from exc
 
 
 # ============================================================
@@ -3005,181 +3117,6 @@ def execute_analysis(
 
 
 # ============================================================
-# LOCAL RESULT EXPLANATION
-# ============================================================
-
-def _local_explanation(
-    question: str,
-    plan: Dict[str, Any],
-    result: Any,
-) -> str:
-    """
-    Produce a safe fallback explanation
-    without requiring Gemini.
-    """
-
-    operation = plan.get(
-        "operation",
-        "",
-    )
-
-    data = serialize_result(
-        result
-    )
-
-    if operation in {
-        "calculate_sum",
-        "filtered_sum",
-    }:
-        value_column = plan.get(
-            "column"
-        ) or plan.get(
-            "value_column"
-        )
-
-        if operation == "filtered_sum":
-            return (
-                f"The total of "
-                f"{value_column} "
-                f"for the requested "
-                f"conditions is "
-                f"{data}."
-            )
-
-        return (
-            f"The total of "
-            f"{value_column} is "
-            f"{data}."
-        )
-
-    if operation in {
-        "calculate_average",
-        "filtered_average",
-    }:
-        value_column = plan.get(
-            "column"
-        ) or plan.get(
-            "value_column"
-        )
-
-        if operation == "filtered_average":
-            return (
-                f"The average of "
-                f"{value_column} "
-                f"for the requested "
-                f"conditions is "
-                f"{data}."
-            )
-
-        return (
-            f"The average of "
-            f"{value_column} is "
-            f"{data}."
-        )
-
-    if operation in {
-        "calculate_count",
-        "filtered_count",
-    }:
-        count_column = plan.get(
-            "column"
-        ) or plan.get(
-            "count_column"
-        )
-
-        if operation == "filtered_count":
-            return (
-                f"The number of records "
-                f"matching the requested "
-                f"conditions is {data}."
-            )
-
-        return (
-            f"The number of records "
-            f"counted in {count_column} "
-            f"is {data}."
-        )
-
-    if operation in {
-        "calculate_unique_count",
-        "filtered_unique_count",
-    }:
-        value_column = plan.get(
-            "column"
-        ) or plan.get(
-            "value_column"
-        )
-
-        return (
-            f"There are {data} "
-            f"unique values in "
-            f"{value_column}."
-        )
-
-    if operation in {
-        "calculate_min",
-        "filtered_min",
-    }:
-        value_column = plan.get(
-            "column"
-        ) or plan.get(
-            "value_column"
-        )
-
-        return (
-            f"The minimum value of "
-            f"{value_column} is "
-            f"{data}."
-        )
-
-    if operation in {
-        "calculate_max",
-        "filtered_max",
-    }:
-        value_column = plan.get(
-            "column"
-        ) or plan.get(
-            "value_column"
-        )
-
-        return (
-            f"The maximum value of "
-            f"{value_column} is "
-            f"{data}."
-        )
-
-    if operation == "monthly_sum":
-        return (
-            "The monthly result is "
-            f"{data}."
-        )
-
-    if operation == "percentage_of_total":
-        return (
-            "The percentage-of-total "
-            f"result is {data}."
-        )
-
-    if operation in {
-        "group_and_sum",
-        "group_and_average",
-        "group_and_count",
-        "top_n",
-        "filtered_group_and_sum",
-        "filtered_group_and_average",
-        "filtered_top_n",
-        "value_counts",
-        "filtered_value_counts",
-    }:
-        return (
-            "The analysis result is "
-            f"{data}."
-        )
-
-    return str(data)
-
-
-# ============================================================
 # GEMINI RESULT EXPLANATION
 # ============================================================
 
@@ -3188,23 +3125,15 @@ def explain_result(
     plan: Dict[str, Any],
     result: Any,
 ) -> str:
-    """
-    Explain the actual Python result.
+    """Use Gemini to explain the actual Python result.
 
-    Gemini is optional. When disabled,
-    a deterministic explanation is returned.
+    Gemini may explain the result, but it is never allowed to replace
+    the Python calculation or invent a value that is not present in it.
     """
 
     result_data = serialize_result(
         result
     )
-
-    if not USE_GEMINI or client is None:
-        return _local_explanation(
-            question,
-            plan,
-            result_data,
-        )
 
     prompt = f"""
 You are an expert data analyst.
@@ -3241,30 +3170,24 @@ RULES:
 
 5. Explain the key finding.
 
-6. If the result is grouped data,
-   identify the highest relevant group
-   when that is directly evident.
+6. If the result is grouped data, identify the highest relevant group
+   when that is directly evident from the supplied result.
 
-7. If the result is a percentage table,
-   identify the largest contribution
-   when directly evident.
+7. If the result is a percentage table, identify the largest contribution
+   when directly evident from the supplied result.
 
-8. If the result is monthly data,
-   identify the highest month
-   when directly evident.
+8. If the result is monthly data, identify the highest month
+   when directly evident from the supplied result.
 
-9. For unique-count operations,
-   clearly say unique or distinct.
+9. For unique-count operations, clearly say unique or distinct.
 
-10. For filtered operations,
-    mention the applied conditions.
+10. For filtered operations, mention the applied conditions.
 
-11. Do not confuse record count
-    with unique count.
+11. Do not confuse record count with unique count.
 
 12. Do not mention internal prompts.
 
-13. Do not mention Gemini.
+13. Do not mention implementation details unless the user asks.
 
 14. Do not perform a new calculation.
 
@@ -3272,33 +3195,28 @@ RULES:
 """
 
     try:
-
         response = client.models.generate_content(
             model=MODEL_NAME,
             contents=prompt,
         )
+    except Exception as exc:
+        raise RuntimeError(
+            "Gemini failed while explaining the analysis result: "
+            f"{exc}"
+        ) from exc
 
-        if (
-            response is not None
-            and getattr(
-                response,
-                "text",
-                None,
-            )
-        ):
-            return response.text.strip() # pyright: ignore[reportOptionalMemberAccess]
-
-    except Exception:
-        # Gemini explanation is optional.
-        # Never let an explanation failure
-        # destroy a successful Python analysis.
-        pass
-
-    return _local_explanation(
-        question,
-        plan,
-        result_data,
+    text = getattr(
+        response,
+        "text",
+        None,
     )
+
+    if not text or not text.strip():
+        raise RuntimeError(
+            "Gemini returned an empty explanation."
+        )
+
+    return text.strip()
 
 
 # ============================================================
@@ -3320,10 +3238,10 @@ def run_analysis(
         User Question
               |
               v
-        Deterministic Planner
+        Gemini Planner
               |
               v
-        Optional Gemini fallback
+        Validated Gemini plan
               |
               v
         Normalize Plan
@@ -3338,15 +3256,15 @@ def run_analysis(
         Actual Result
               |
               v
-        Optional Explanation
+        Gemini Explanation
               |
               v
         Final Response
 
     Important:
 
-    Python performs the actual calculation.
-    Gemini never supplies the numeric result.
+    Gemini chooses and explains the analysis, while Python performs
+    and owns the actual calculation. Gemini never supplies the numeric result.
     """
 
     validate_dataframe(df)
