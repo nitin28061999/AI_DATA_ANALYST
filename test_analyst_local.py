@@ -1,7 +1,41 @@
 ﻿import pandas as pd
 import pytest
 from data_profile import create_profile
-from analyst import validate_plan
+from analyst import (
+    execute_analysis,
+    execute_plan,
+    normalize_plan,
+    validate_plan,
+)
+
+
+def test_normalize_plan_rejects_missing_filtered_value_column():
+    df = pd.DataFrame({
+        "Product": ["Laptop", "Phone", "Tablet", "Laptop"],
+        "Revenue": [50000, 30000, 20000, 40000],
+        "Units": [10, 20, 15, 8],
+        "City": ["Delhi", "Mumbai", "Delhi", "Mumbai"],
+    })
+
+    plan = {
+        "operation": "filtered_sum",
+        "column": None,
+        "group_column": None,
+        "value_column": None,
+        "count_column": None,
+        "date_column": None,
+        "n": None,
+        "filters": [
+            {
+                "column": "City",
+                "operator": "=",
+                "value": "Delhi",
+            }
+        ],
+    }
+
+    with pytest.raises(ValueError):
+        normalize_plan(df, plan)
 
 
 def test_validate_total_revenue_plan():
@@ -121,3 +155,159 @@ def test_validate_rejects_invalid_filter_column():
 
     with pytest.raises((ValueError, TypeError)):
         validate_plan(plan, profile)
+
+
+def test_execute_filtered_revenue_locally():
+    df = pd.DataFrame({
+        "Product": ["Laptop", "Phone", "Tablet", "Laptop"],
+        "Revenue": [50000, 30000, 20000, 40000],
+        "Units": [10, 20, 15, 8],
+        "City": ["Delhi", "Mumbai", "Delhi", "Mumbai"],
+    })
+    plan = {
+        "operation": "filtered_sum",
+        "column": None,
+        "group_column": None,
+        "value_column": "Revenue",
+        "count_column": None,
+        "date_column": None,
+        "n": None,
+        "filters": [
+            {
+                "column": "City",
+                "operator": "=",
+                "value": "Delhi",
+            }
+        ],
+    }
+
+    result = execute_analysis(df, plan)
+
+    assert result == 70000.0
+
+
+def test_calculate_sum_result():
+    df = pd.DataFrame({
+        "Product": ["Laptop", "Phone", "Tablet", "Laptop"],
+        "Revenue": [50000, 30000, 20000, 40000],
+        "Units": [10, 20, 15, 8],
+        "City": ["Delhi", "Mumbai", "Delhi", "Mumbai"],
+    })
+
+    profile = create_profile(df)
+
+    plan = {
+        "operation": "calculate_sum",
+        "column": "Revenue",
+        "group_column": None,
+        "value_column": None,
+        "count_column": None,
+        "date_column": None,
+        "n": None,
+        "filters": None,
+    }
+
+    validated_plan = validate_plan(plan, profile)
+
+    # Use the validated plan with the local calculation path.
+    result = df[validated_plan["column"]].sum()
+
+    assert result == 140000
+
+
+def test_filtered_sum_result():
+    df = pd.DataFrame({
+        "Product": ["Laptop", "Phone", "Tablet", "Laptop"],
+        "Revenue": [50000, 30000, 20000, 40000],
+        "Units": [10, 20, 15, 8],
+        "City": ["Delhi", "Mumbai", "Delhi", "Mumbai"],
+    })
+
+    profile = create_profile(df)
+
+    plan = {
+        "operation": "filtered_sum",
+        "column": None,
+        "group_column": None,
+        "value_column": "Revenue",
+        "count_column": None,
+        "date_column": None,
+        "n": None,
+        "filters": [
+            {
+                "column": "City",
+                "operator": "=",
+                "value": "Delhi",
+            }
+        ],
+    }
+
+    validated_plan = validate_plan(plan, profile)
+
+    filtered_df = df[
+        df[validated_plan["filters"][0]["column"]]
+        == validated_plan["filters"][0]["value"]
+    ]
+
+    result = filtered_df[validated_plan["value_column"]].sum()
+
+    assert result == 70000
+
+
+def test_execute_analysis_filtered_revenue():
+    df = pd.DataFrame({
+        "Product": ["Laptop", "Phone", "Tablet", "Laptop"],
+        "Revenue": [50000, 30000, 20000, 40000],
+        "Units": [10, 20, 15, 8],
+        "City": ["Delhi", "Mumbai", "Delhi", "Mumbai"],
+    })
+    plan = {
+        "operation": "filtered_sum",
+        "column": None,
+        "group_column": None,
+        "value_column": "Revenue",
+        "count_column": None,
+        "date_column": None,
+        "n": None,
+        "filters": [
+            {
+                "column": "City",
+                "operator": "=",
+                "value": "Delhi",
+            }
+        ],
+    }
+
+    result = execute_analysis(df, plan)
+
+    assert result == 70000.0
+
+
+def test_execute_plan_filtered_revenue():
+    df = pd.DataFrame({
+        "Product": ["Laptop", "Phone", "Tablet", "Laptop"],
+        "Revenue": [50000, 30000, 20000, 40000],
+        "Units": [10, 20, 15, 8],
+        "City": ["Delhi", "Mumbai", "Delhi", "Mumbai"],
+    })
+
+    plan = {
+        "operation": "filtered_sum",
+        "column": None,
+        "group_column": None,
+        "value_column": "Revenue",
+        "count_column": None,
+        "date_column": None,
+        "n": None,
+        "filters": [
+            {
+                "column": "City",
+                "operator": "=",
+                "value": "Delhi",
+            }
+        ],
+    }
+
+    result = execute_plan(df, plan)
+
+    assert result == 70000.0
