@@ -209,7 +209,6 @@ def test_calculate_sum_result():
 
     validated_plan = validate_plan(plan, profile)
 
-    # Use the validated plan with the local calculation path.
     result = df[validated_plan["column"]].sum()
 
     assert result == 140000
@@ -311,3 +310,55 @@ def test_execute_plan_filtered_revenue():
     result = execute_plan(df, plan)
 
     assert result == 70000.0
+
+
+def test_execute_plan_grouped_sum():
+    df = pd.DataFrame({
+        "Product": ["Laptop", "Phone", "Tablet", "Laptop"],
+        "Revenue": [50000, 30000, 20000, 40000],
+        "Units": [10, 20, 15, 8],
+        "City": ["Delhi", "Mumbai", "Delhi", "Mumbai"],
+    })
+
+    plan = {
+        "operation": "group_and_sum",
+        "column": None,
+        "group_column": "Product",
+        "value_column": "Revenue",
+        "count_column": None,
+        "date_column": None,
+        "n": None,
+        "filters": None,
+    }
+
+    result = execute_plan(df, plan)
+
+    if isinstance(result, pd.DataFrame):
+        res_df = result.set_index("Product") if "Product" in result.columns else result
+        assert res_df.loc["Laptop", "Revenue"] == 90000
+        assert res_df.loc["Phone", "Revenue"] == 30000
+    else:
+        assert result["Laptop"] == 90000
+        assert result["Phone"] == 30000
+
+
+def test_execute_plan_top_n():
+    df = pd.DataFrame({
+        "Product": ["Laptop", "Phone", "Tablet", "Laptop"],
+        "Revenue": [50000, 30000, 20000, 40000],
+    })
+
+    plan = {
+        "operation": "top_n",
+        "column": None,
+        "group_column": "Product",
+        "value_column": "Revenue",
+        "count_column": None,
+        "date_column": None,
+        "n": 2,
+        "filters": None,
+    }
+
+    result = execute_plan(df, plan)
+
+    assert len(result) == 2
