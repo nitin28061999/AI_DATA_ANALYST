@@ -1,103 +1,34 @@
 ﻿import pandas as pd
+import pytest
 
-from analysis_tools import (
-    filtered_sum_multi,
-    filtered_average_multi,
-    filtered_count_multi,
-    filtered_unique_count_multi,
-)
+from analysis_tools import apply_filters, filtered_sum
 
 
-df = pd.DataFrame({
-    "City": [
-        "Delhi",
-        "Delhi",
-        "Mumbai",
-        "Delhi",
-        "Mumbai",
-    ],
-
-    "Product": [
-        "Laptop",
-        "Phone",
-        "Laptop",
-        "Laptop",
-        "Phone",
-    ],
-
-    "Revenue": [
-        1000,
-        500,
-        2000,
-        1500,
-        800,
-    ],
-
-    "Customer_ID": [
-        "C001",
-        "C002",
-        "C003",
-        "C001",
-        "C004",
-    ],
-
-    "Invoice_ID": [
-        "INV001",
-        "INV002",
-        "INV003",
-        "INV004",
-        "INV005",
-    ],
-})
-
-
-filters = [
-    {
-        "column": "City",
-        "value": "Delhi"
-    },
-    {
-        "column": "Product",
-        "value": "Laptop"
-    }
-]
-
-
-print(
-    "SUM:",
-    filtered_sum_multi(
-        df,
-        filters,
-        "Revenue"
+@pytest.fixture
+def multi_filter_df() -> pd.DataFrame:
+    return pd.DataFrame(
+        {
+            "Region": ["North", "North", "South", "East"],
+            "Category": ["A", "B", "A", "B"],
+            "Sales": [100.0, 200.0, 150.0, 300.0],
+        }
     )
-)
 
 
-print(
-    "AVERAGE:",
-    filtered_average_multi(
-        df,
-        filters,
-        "Revenue"
-    )
-)
+def test_multiple_filters_and_logic(multi_filter_df):
+    filters = [
+        {"column": "Region", "operator": "=", "value": "North"},
+        {"column": "Category", "operator": "=", "value": "A"},
+    ]
+    result = apply_filters(multi_filter_df, filters)
+    assert len(result) == 1
+    assert result.iloc[0]["Sales"] == 100.0
 
 
-print(
-    "COUNT:",
-    filtered_count_multi(
-        df,
-        filters,
-        "Invoice_ID"
-    )
-)
-
-
-print(
-    "UNIQUE CUSTOMERS:",
-    filtered_unique_count_multi(
-        df,
-        filters,
-        "Customer_ID"
-    )
-)
+def test_filtered_sum_with_multiple_filters(multi_filter_df):
+    filters = [
+        {"column": "Region", "operator": "=", "value": "North"},
+        {"column": "Sales", "operator": ">", "value": 150.0},
+    ]
+    total = filtered_sum(multi_filter_df, filters, "Sales")
+    assert total == 200.0
