@@ -362,3 +362,105 @@ def test_execute_plan_top_n():
     result = execute_plan(df, plan)
 
     assert len(result) == 2
+
+
+def test_execute_plan_average_revenue():
+    df = pd.DataFrame({
+        "Product": ["Laptop", "Phone", "Tablet", "Laptop"],
+        "Revenue": [50000, 30000, 20000, 40000],
+        "Units": [10, 20, 15, 8],
+        "City": ["Delhi", "Mumbai", "Delhi", "Mumbai"],
+    })
+
+    plan = {
+        "operation": "calculate_average",
+        "column": "Revenue",
+        "group_column": None,
+        "value_column": None,
+        "count_column": None,
+        "date_column": None,
+        "n": None,
+        "filters": None,
+    }
+
+    result = execute_plan(df, plan)
+
+    assert result == 35000.0
+
+
+def test_execute_plan_filtered_sum_greater_than():
+    df = pd.DataFrame({
+        "Product": ["Laptop", "Phone", "Tablet", "Laptop"],
+        "Revenue": [50000, 30000, 20000, 40000],
+        "Units": [10, 20, 15, 8],
+        "City": ["Delhi", "Mumbai", "Delhi", "Mumbai"],
+    })
+
+    plan = {
+        "operation": "filtered_sum",
+        "column": None,
+        "group_column": None,
+        "value_column": "Revenue",
+        "count_column": None,
+        "date_column": None,
+        "n": None,
+        "filters": [
+            {
+                "column": "Revenue",
+                "operator": ">",
+                "value": 30000,
+            }
+        ],
+    }
+
+    result = execute_plan(df, plan)
+
+    assert result == 90000.0
+
+
+def test_execute_plan_min_revenue():
+    df = pd.DataFrame({
+        "Product": ["Laptop", "Phone", "Tablet", "Laptop"],
+        "Revenue": [50000, 30000, 20000, 40000],
+        "Units": [10, 20, 15, 8],
+        "City": ["Delhi", "Mumbai", "Delhi", "Mumbai"],
+    })
+
+    plan = {
+        "operation": "calculate_min",
+        "column": "Revenue",
+        "group_column": None,
+        "value_column": None,
+        "count_column": None,
+        "date_column": None,
+        "n": None,
+        "filters": None,
+    }
+
+    result = execute_plan(df, plan)
+
+    assert result == 20000.0
+
+
+def test_execute_plan_max_revenue():
+    df = pd.DataFrame({
+        "Product": ["Laptop", "Phone", "Tablet", "Laptop"],
+        "Revenue": [50000, 30000, 20000, 40000],
+        "Units": [10, 20, 15, 8],
+        "City": ["Delhi", "Mumbai", "Delhi", "Mumbai"],
+    })
+
+    plan = {
+        "operation": "calculate_max",
+        "column": "Revenue",
+        "group_column": None,
+        "value_column": None,
+        "count_column": None,
+        "date_column": None,
+        "n": None,
+        "filters": None,
+    }
+
+    result = execute_plan(df, plan)
+
+    assert result == 50000.0

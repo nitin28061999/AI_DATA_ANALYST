@@ -1,67 +1,33 @@
-import pandas as pd
+import pytest
 
-from data_profile import create_profile
-from ai_agent import ask_data_question # pyright: ignore[reportAttributeAccessIssue]
+from ai_agent import extract_json
 
 
-# ---------------------------------------------------------
-# Create test dataset
-# ---------------------------------------------------------
+def test_extract_json_direct_object():
+    payload = '{"operation": "calculate_sum", "column": "Revenue"}'
 
-data = {
-    "Product": [
-        "Laptop",
-        "Phone",
-        "Tablet",
-        "Laptop",
-        "Phone",
-    ],
-    "Revenue": [
-        50000,
-        30000,
-        20000,
-        45000,
-        35000,
-    ],
-    "Units": [
-        10,
-        20,
-        15,
-        8,
-        25,
-    ],
-    "City": [
-        "Delhi",
-        "Mumbai",
-        "Delhi",
-        "Mumbai",
-        "Delhi",
-    ],
+    result = extract_json(payload)
+
+    assert result == {
+        "operation": "calculate_sum",
+        "column": "Revenue",
+    }
+
+
+def test_extract_json_from_markdown_fence():
+    payload = """```json
+{
+    "operation": "filtered_sum",
+    "value_column": "Revenue"
 }
+```"""
+
+    result = extract_json(payload)
+
+    assert result["operation"] == "filtered_sum"
+    assert result["value_column"] == "Revenue"
 
 
-df = pd.DataFrame(data)
-
-
-# ---------------------------------------------------------
-# Create dataset profile
-# ---------------------------------------------------------
-
-profile = create_profile(df)
-
-
-# ---------------------------------------------------------
-# Ask AI
-# ---------------------------------------------------------
-
-question = "Which columns could I use to analyze revenue?"
-
-
-answer = ask_data_question(
-    profile,
-    question
-)
-
-
-print("\nAI ANALYST RESPONSE:\n")
-print(answer)
+def test_extract_json_rejects_invalid_response():
+    with pytest.raises(ValueError):
+        extract_json("This response contains no JSON.")

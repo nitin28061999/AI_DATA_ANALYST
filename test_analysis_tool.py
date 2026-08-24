@@ -49,27 +49,25 @@ class TestValidation:
 
 class TestFilterEngine:
     def test_apply_filters_equality(self, sample_dataframe):
-        self._extracted_from_test_apply_filters_contains_2(
-            "=", "North", sample_dataframe
-        )
+        self._assert_filter_matches_count("=", "North", sample_dataframe, expected_count=3)
 
     def test_apply_filters_between(self, sample_dataframe):
         filters = [
             {"column": "Sales", "operator": "between", "value": [100, 200]}
         ]
+
         result = apply_filters(sample_dataframe, filters)
-        assert len(result) == 3
+
+        assert len(result) == 4
+        assert result["Sales"].tolist() == [100.0, 150.0, 200.0, 120.0]
 
     def test_apply_filters_contains(self, sample_dataframe):
-        self._extracted_from_test_apply_filters_contains_2(
-            "contains", "ort", sample_dataframe
-        )
+        self._assert_filter_matches_count("contains", "ort", sample_dataframe, expected_count=3)
 
-    # TODO Rename this here and in `test_apply_filters_equality` and `test_apply_filters_contains`
-    def _extracted_from_test_apply_filters_contains_2(self, arg0, arg1, sample_dataframe):
-        filters = [{"column": "Region", "operator": arg0, "value": arg1}]
+    def _assert_filter_matches_count(self, operator, value, sample_dataframe, expected_count):
+        filters = [{"column": "Region", "operator": operator, "value": value}]
         result = apply_filters(sample_dataframe, filters)
-        assert len(result) == 3
+        assert len(result) == expected_count
 
 
 class TestAggregations:
