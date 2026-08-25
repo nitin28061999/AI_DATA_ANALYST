@@ -225,16 +225,17 @@ def _text_normalize(
 # ============================================================
 # FILTER ENGINE
 # ============================================================
-
 def apply_filters(
     df: pd.DataFrame,
     filters: list,
-) -> pd.DataFrame:  # sourcery skip: low-code-quality
+) -> pd.DataFrame:    # sourcery skip: low-code-quality
     """
     Apply multiple filters using AND logic.
 
-    Supported operators: =, ==, !=, >, >=, <, <=, contains, between
+    Supported operators:
+    =, ==, !=, >, >=, <, <=, contains, between
     """
+
     validate_filters(
         df,
         filters,
@@ -248,142 +249,65 @@ def apply_filters(
 
     for filter_item in filters:
         column = filter_item["column"]
+
         operator = _normalize_operator(
             filter_item.get("operator", "=")
         )
+
         value = filter_item["value"]
         series = df[column]
 
-        # ====================================================
-        # EQUAL
-        # ====================================================
         if operator == "=":
-            converted_value = _convert_value_for_series(series, value)
+            mask &= series == value
 
-            if _is_text_series(series):
-                current_mask = (
-                    series.astype("string")
-                    .str.strip()
-                    .str.casefold()
-                    == _text_normalize(converted_value)
-                )
-                current_mask = current_mask & series.notna()
-            else:
-                try:
-                    current_mask = series == converted_value
-                except (TypeError, ValueError) as exc:
-                    raise ValueError(
-                        f"Cannot compare column '{column}' with value '{value}'."
-                    ) from exc
-
-        # ====================================================
-        # NOT EQUAL
-        # ====================================================
         elif operator == "!=":
-            converted_value = _convert_value_for_series(series, value)
+            mask &= series != value
 
-            if _is_text_series(series):
-                current_mask = (
-                    series.astype("string")
-                    .str.strip()
-                    .str.casefold()
-                    != _text_normalize(converted_value)
-                )
-            else:
-                try:
-                    current_mask = series != converted_value
-                except (TypeError, ValueError) as exc:
-                    raise ValueError(
-                        f"Cannot compare column '{column}' with value '{value}'."
-                    ) from exc
-
-            current_mask = current_mask & series.notna()
-
-        # ====================================================
-        # GREATER THAN
-        # ====================================================
         elif operator == ">":
-            converted_value = _convert_value_for_series(series, value)
-            try:
-                current_mask = series > converted_value
-            except (TypeError, ValueError) as exc:
-                raise ValueError(
-                    f"Cannot apply '>' to column '{column}' with value '{value}'."
-                ) from exc
+            mask &= series > value
 
-        # ====================================================
-        # GREATER THAN OR EQUAL
-        # ====================================================
         elif operator == ">=":
-            converted_value = _convert_value_for_series(series, value)
-            try:
-                current_mask = series >= converted_value
-            except (TypeError, ValueError) as exc:
-                raise ValueError(
-                    f"Cannot apply '>=' to column '{column}' with value '{value}'."
-                ) from exc
+            mask &= series >= value
 
-        # ====================================================
-        # LESS THAN
-        # ====================================================
         elif operator == "<":
-            converted_value = _convert_value_for_series(series, value)
-            try:
-                current_mask = series < converted_value
-            except (TypeError, ValueError) as exc:
-                raise ValueError(
-                    f"Cannot apply '<' to column '{column}' with value '{value}'."
-                ) from exc
+            mask &= series < value
 
-        # ====================================================
-        # LESS THAN OR EQUAL
-        # ====================================================
         elif operator == "<=":
-            converted_value = _convert_value_for_series(series, value)
-            try:
-                current_mask = series <= converted_value
-            except (TypeError, ValueError) as exc:
-                raise ValueError(
-                    f"Cannot apply '<=' to column '{column}' with value '{value}'."
-                ) from exc
+            mask &= series <= value
 
-        # ====================================================
-        # CONTAINS
-        # ====================================================
         elif operator == "contains":
-            current_mask = (
-                series.astype("string")
+            mask &= (
+                series.astype(str)
                 .str.contains(
                     str(value),
                     case=False,
                     na=False,
-                    regex=False,
                 )
             )
 
-        # ====================================================
-        # BETWEEN
-        # ====================================================
         elif operator == "between":
-            lower_value = _convert_value_for_series(series, value[0])
-            upper_value = _convert_value_for_series(series, value[1])
-
-            try:
-                current_mask = series.between(
-                    lower_value,
-                    upper_value,
-                    inclusive="both",
-                )
-            except (TypeError, ValueError) as exc:
+            if (
+                not isinstance(value, (list, tuple))
+                or len(value) != 2
+            ):
                 raise ValueError(
-                    f"Cannot apply 'between' to column '{column}' "
-                    f"with values '{value[0]}' and '{value[1]}'."
-                ) from exc
+                    "The 'between' filter requires "
+                    "exactly two values."
+                )
+
+            lower, upper = value
+
+            mask &= series.between(
+                lower,
+                upper,
+                inclusive="both",
+            )
 
         else:
-            raise ValueError(f"Unsupported operator: {operator}")
-
-        mask = mask & current_mask.fillna(False).astype(bool)
+            raise ValueError(
+                f"Unsupported filter operator "
+                f"'{operator}'."
+            )
 
     return df.loc[mask].copy()
 
@@ -913,5 +837,25 @@ def dataframe_to_records(result: Any) -> Any:
         missing = pd.isna(result)
         if isinstance(missing, (bool, np.bool_)) and missing:
             return None
+        # ============================================================
+# BACKWARD COMPATIBILITY
+# ============================================================
 
-    return result
+def normalize_filters(
+    df: pd.DataFrame,
+    filters: list,
+) -> list:
+    """
+    Backward-compatible wrapper.
+
+    The canonical normalize_filters implementation lives in
+    analyst.py. This wrapper keeps older imports working without
+    duplicating the normalization logic.
+    """
+
+    from analyst import normalize_filters as _normalize_filters
+
+    return _normalize_filters(
+        df,
+        filters, # pyright: ignore[reportArgumentType]
+    )

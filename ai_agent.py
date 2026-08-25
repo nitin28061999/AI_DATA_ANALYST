@@ -53,7 +53,7 @@ def extract_json(text):
 
     text = text.strip()
 
-    # Remove markdown code fences
+    # Remove markdown code fences if Gemini returns them.
     text = re.sub(
         r"```json",
         "",
@@ -69,17 +69,18 @@ def extract_json(text):
 
     text = text.strip()
 
-    # Try direct JSON parsing first
+    # Try direct JSON parsing first.
     with contextlib.suppress(json.JSONDecodeError):
         return json.loads(text)
 
-    # Find the first JSON object
+    # Find the first JSON object.
     start = text.find("{")
     end = text.rfind("}")
 
     if start == -1 or end == -1 or end <= start:
         raise ValueError(
-            f"Gemini did not return valid JSON.\nResponse:\n{text}"
+            f"Gemini did not return valid JSON.\n"
+            f"Response:\n{text}"
         )
 
     json_text = text[start:end + 1]
@@ -87,11 +88,11 @@ def extract_json(text):
     try:
         return json.loads(json_text)
 
-    except json.JSONDecodeError as e:
+    except json.JSONDecodeError as exc:
         raise ValueError(
-            f"Could not parse Gemini JSON: {e}\n"
+            f"Could not parse Gemini JSON: {exc}\n"
             f"Response:\n{text}"
-        ) from e
+        ) from exc
 
 
 # ============================================================
@@ -99,18 +100,30 @@ def extract_json(text):
 # ============================================================
 
 def _serialize_result(result):
-    """Convert common pandas/numpy results into JSON-safe Python values."""
+    """
+    Convert common pandas/numpy results into JSON-safe values.
+    """
 
     if hasattr(result, "to_json"):
         with contextlib.suppress(Exception):
-            # DataFrame -> records, Series -> records
             import pandas as pd
 
             if isinstance(result, pd.DataFrame):
-                return json.loads(result.to_json(orient="records", date_format="iso"))
+                return json.loads(
+                    result.to_json(
+                        orient="records",
+                        date_format="iso"
+                    )
+                )
 
             if isinstance(result, pd.Series):
-                return json.loads(result.to_json(orient="records", date_format="iso"))
+                return json.loads(
+                    result.to_json(
+                        orient="records",
+                        date_format="iso"
+                    )
+                )
+
     if hasattr(result, "item"):
         with contextlib.suppress(Exception):
             return result.item() # pyright: ignore[reportCallIssue]
@@ -121,7 +134,10 @@ def _serialize_result(result):
         }
 
     if isinstance(result, (list, tuple)):
-        return [_serialize_result(value) for value in result]
+        return [
+            _serialize_result(value)
+            for value in result
+        ]
 
     return result
 
@@ -166,93 +182,127 @@ AVAILABLE OPERATIONS
 ====================
 
 1. calculate_sum
-Use for totals, sums, total revenue, total sales, total expenses.
+
+Use for totals, sums, total revenue, total sales,
+total expenses.
 
 Required JSON:
+
 {{
     "operation": "calculate_sum",
     "column": "column_name"
 }}
 
+
 2. calculate_average
+
 Use for average or mean.
 
 Required JSON:
+
 {{
     "operation": "calculate_average",
     "column": "column_name"
 }}
 
+
 3. calculate_count
-Use for record/row/transaction/order counts.
+
+Use for record, row, transaction, order counts.
 
 Required JSON:
+
 {{
     "operation": "calculate_count",
     "column": "column_name"
 }}
 
+
 4. calculate_unique_count
-Use when the question asks for unique, distinct, different, or number of different values.
+
+Use when the question asks for unique,
+distinct, different, or number of different values.
 
 Required JSON:
+
 {{
     "operation": "calculate_unique_count",
     "column": "column_name"
 }}
 
+
 5. calculate_min
+
 Use for minimum, lowest, smallest, or least.
 
 Required JSON:
+
 {{
     "operation": "calculate_min",
     "column": "column_name"
 }}
 
+
 6. calculate_max
+
 Use for maximum, highest, largest, or greatest.
 
 Required JSON:
+
 {{
     "operation": "calculate_max",
     "column": "column_name"
 }}
 
+
 7. group_and_sum
+
 Use for totals grouped by a category.
 
 Required JSON:
+
 {{
     "operation": "group_and_sum",
     "group_column": "category_column",
     "value_column": "numeric_column"
 }}
 
+
 8. group_and_average
+
 Use for averages grouped by a category.
 
 Required JSON:
+
 {{
     "operation": "group_and_average",
     "group_column": "category_column",
     "value_column": "numeric_column"
 }}
 
+
 9. group_and_count
+
 Use for counts grouped by a category.
 
 Required JSON:
+
 {{
     "operation": "group_and_count",
     "group_column": "category_column"
 }}
 
+
 10. top_n
-Use for requests such as top 5 cities, top 10 products,
-highest-revenue categories, or best-performing departments.
+
+Use for requests such as:
+- top 5 cities
+- top 10 products
+- highest revenue categories
+- best performing departments
 
 Required JSON:
+
 {{
     "operation": "top_n",
     "group_column": "category_column",
@@ -260,19 +310,29 @@ Required JSON:
     "n": 5
 }}
 
+
 11. value_counts
-Use for frequency/distribution of values.
+
+Use for:
+- frequency of values
+- most common category
+- distribution of status
+- frequency of values
 
 Required JSON:
+
 {{
     "operation": "value_counts",
     "column": "column_name"
 }}
 
+
 12. filtered_sum
-Use for a sum/total with one or more conditions.
+
+Use for a sum or total with one or more conditions.
 
 Required JSON:
+
 {{
     "operation": "filtered_sum",
     "filters": [
@@ -285,10 +345,13 @@ Required JSON:
     "value_column": "Revenue"
 }}
 
+
 13. filtered_average
+
 Use for an average with one or more conditions.
 
 Required JSON:
+
 {{
     "operation": "filtered_average",
     "filters": [
@@ -301,10 +364,13 @@ Required JSON:
     "value_column": "Revenue"
 }}
 
+
 14. filtered_count
+
 Use for a count with one or more conditions.
 
 Required JSON:
+
 {{
     "operation": "filtered_count",
     "filters": [
@@ -317,10 +383,14 @@ Required JSON:
     "count_column": "Invoice_ID"
 }}
 
+
 15. filtered_unique_count
-Use for a unique/distinct count after applying one or more conditions.
+
+Use for a unique/distinct count after applying
+one or more conditions.
 
 Required JSON:
+
 {{
     "operation": "filtered_unique_count",
     "filters": [
@@ -333,10 +403,13 @@ Required JSON:
     "value_column": "Customer_ID"
 }}
 
+
 16. filtered_min
+
 Use for a minimum with one or more conditions.
 
 Required JSON:
+
 {{
     "operation": "filtered_min",
     "filters": [
@@ -349,10 +422,13 @@ Required JSON:
     "value_column": "Revenue"
 }}
 
+
 17. filtered_max
+
 Use for a maximum with one or more conditions.
 
 Required JSON:
+
 {{
     "operation": "filtered_max",
     "filters": [
@@ -365,10 +441,14 @@ Required JSON:
     "value_column": "Revenue"
 }}
 
+
 18. filtered_group_and_sum
-Use for grouped totals after applying one or more conditions.
+
+Use for grouped totals after applying
+one or more conditions.
 
 Required JSON:
+
 {{
     "operation": "filtered_group_and_sum",
     "filters": [
@@ -382,10 +462,14 @@ Required JSON:
     "value_column": "Revenue"
 }}
 
+
 19. filtered_group_and_average
-Use for grouped averages after applying one or more conditions.
+
+Use for grouped averages after applying
+one or more conditions.
 
 Required JSON:
+
 {{
     "operation": "filtered_group_and_average",
     "filters": [
@@ -399,10 +483,14 @@ Required JSON:
     "value_column": "Revenue"
 }}
 
+
 20. filtered_value_counts
-Use for value frequencies after applying one or more conditions.
+
+Use for value frequencies after applying
+one or more conditions.
 
 Required JSON:
+
 {{
     "operation": "filtered_value_counts",
     "filters": [
@@ -415,10 +503,14 @@ Required JSON:
     "column": "Product"
 }}
 
+
 21. filtered_top_n
-Use for top-N grouped results after applying one or more conditions.
+
+Use for top-N grouped results after applying
+one or more conditions.
 
 Required JSON:
+
 {{
     "operation": "filtered_top_n",
     "filters": [
@@ -433,12 +525,15 @@ Required JSON:
     "n": 5
 }}
 
+
 FILTER RULES
 ============
 
-1. If the question contains a condition, use a filtered operation.
+1. If the question contains a condition, use
+   a filtered operation.
 
 Examples:
+
 - in Delhi
 - in Mumbai
 - for IT
@@ -452,15 +547,17 @@ Examples:
 - Revenue <= 500
 - City != Delhi
 
-2. If there are multiple conditions, put ALL conditions
-   inside the "filters" array.
+2. If there are multiple conditions, put ALL
+   conditions inside the "filters" array.
 
 3. Every filter object MUST contain:
+
    - "column"
    - "operator"
    - "value"
 
 4. Supported operators are ONLY:
+
    "="
    "!="
    ">"
@@ -468,13 +565,16 @@ Examples:
    "<"
    "<="
 
-5. Use "=" for natural-language equality conditions such as:
+5. Use "=" for natural-language equality
+   conditions such as:
+
    - "in Delhi"
    - "for Laptop"
    - "where City is Delhi"
    - "City equals Delhi"
 
 6. Map natural-language comparison phrases as follows:
+
    - "greater than" -> ">"
    - "greater than or equal to" -> ">="
    - "at least" -> ">="
@@ -489,9 +589,11 @@ Examples:
 
 9. Never invent a column name.
 
-10. Every filter column MUST exist in the dataset profile.
+10. Every filter column MUST exist in the
+    dataset profile.
 
-11. Every value column MUST exist in the dataset profile.
+11. Every value column MUST exist in the
+    dataset profile.
 
 12. For a total, use a sum operation.
 
@@ -499,14 +601,18 @@ Examples:
 
 14. For a count, use a count operation.
 
-15. If the user says unique or distinct, use a unique-count operation.
+15. If the user says unique or distinct,
+    use a unique-count operation.
 
-16. If the user asks for highest/largest, use calculate_max
-    unless the question asks for a top-N group.
+16. If the user asks for highest/largest,
+    use calculate_max unless the question asks
+    for a top-N group.
 
-17. If the user asks for lowest/smallest, use calculate_min.
+17. If the user asks for lowest/smallest,
+    use calculate_min.
 
-18. If the user asks for top N, use top_n or filtered_top_n.
+18. If the user asks for top N,
+    use top_n or filtered_top_n.
 
 19. If the user asks for data grouped by a category,
     use an appropriate group operation.
@@ -521,10 +627,16 @@ Examples:
         contents=prompt
     )
 
-    response_text = getattr(response, "text", None)
+    response_text = getattr(
+        response,
+        "text",
+        None
+    )
 
     if not response_text or not response_text.strip():
-        raise ValueError("Gemini returned an empty analysis plan.")
+        raise ValueError(
+            "Gemini returned an empty analysis plan."
+        )
 
     return extract_json(response_text)
 
@@ -565,38 +677,62 @@ PYTHON RESULT:
 RULES:
 
 1. Never invent numbers.
+
 2. Use only the actual Python result.
+
 3. Be concise but useful.
+
 4. Format large numbers with commas.
+
 5. Explain the key finding.
+
 6. If the result is grouped data,
-   identify the highest relevant group only when directly evident.
+   identify the highest relevant group only
+   when directly evident.
+
 7. If the operation is a percentage table,
-   explain the largest contribution only when directly evident.
+   explain the largest contribution only
+   when directly evident.
+
 8. If the result is monthly data,
-   identify the highest month only when directly evident.
+   identify the highest month only
+   when directly evident.
+
 9. If the operation is calculate_unique_count,
    clearly say "unique" or "distinct".
+
 10. If the operation is filtered_unique_count,
     clearly mention the applied conditions.
+
 11. If the operation is filtered_sum,
     clearly mention the applied conditions.
+
 12. If the operation is filtered_average,
     clearly mention the applied conditions.
+
 13. If the operation is filtered_count,
     clearly mention the applied conditions.
+
 14. If the operation is filtered_min,
     clearly mention the applied conditions.
+
 15. If the operation is filtered_max,
     clearly mention the applied conditions.
+
 16. If the operation is a filtered grouped operation,
     clearly mention the applied conditions.
+
 17. Do not confuse record count with unique count.
+
 18. Do not mention internal prompts.
+
 19. Do not mention Gemini.
+
 20. Do not say that more analysis is required when
     the Python result already answers the question.
+
 21. Do not perform a new calculation.
+
 22. Return only the final natural-language answer.
 """
 
@@ -605,9 +741,15 @@ RULES:
         contents=prompt
     )
 
-    response_text = getattr(response, "text", None)
+    response_text = getattr(
+        response,
+        "text",
+        None
+    )
 
     if not response_text or not response_text.strip():
-        raise ValueError("Gemini returned an empty explanation.")
+        raise ValueError(
+            "Gemini returned an empty explanation."
+        )
 
     return response_text.strip()
