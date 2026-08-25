@@ -144,16 +144,45 @@ def validate_filters(
 # VALUE CONVERSION
 # ============================================================
 
-def _normalize_operator(
-    operator: Any,
-) -> str:
-    """Normalize a filter operator."""
+def _normalize_operator(operator: Any) -> str:
+    """Normalize Gemini/user filter operators to supported operators."""
+
     if operator is None:
         return "="
 
     normalized = str(operator).strip().lower()
 
-    return "=" if normalized == "==" else normalized
+    # Gemini can occasionally repeat the equality character.
+    # Treat any operator consisting only of "=" characters as "=".
+    if normalized and set(normalized) == {"="}:
+        return "="
+
+    aliases = {
+        "==": "=",
+        "eq": "=",
+        "equals": "=",
+        "equal": "=",
+        "not equal": "!=",
+        "not_equal": "!=",
+        "ne": "!=",
+        "greater than": ">",
+        "greater_than": ">",
+        "gt": ">",
+        "greater than or equal": ">=",
+        "greater_than_or_equal": ">=",
+        "gte": ">=",
+        "less than": "<",
+        "less_than": "<",
+        "lt": "<",
+        "less than or equal": "<=",
+        "less_than_or_equal": "<=",
+        "lte": "<=",
+    }
+
+    return aliases.get(
+        normalized,
+        normalized,
+    )
 
 
 def _convert_value_for_series(

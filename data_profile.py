@@ -1,5 +1,5 @@
 import contextlib
-import pandas as pd
+
 import pandas as pd
 
 
@@ -19,7 +19,6 @@ def _is_id_like(column_name, series):
         "code",
         "number",
         "no",
-        "number",
         "invoice",
         "employee",
         "customer",
@@ -32,7 +31,7 @@ def _is_id_like(column_name, series):
     if any(keyword in name for keyword in id_keywords):
         return True
 
-    # Very high cardinality object columns are often IDs.
+    # Very high-cardinality object columns are often IDs.
     if series.dtype == "object":
         unique_ratio = (
             series.nunique(dropna=True) / max(len(series), 1)
@@ -58,28 +57,34 @@ def _classify_column(column_name, series):
     id
     """
 
+    # Check boolean before numeric.
     if pd.api.types.is_bool_dtype(series):
         return "boolean"
 
+    # Numeric columns.
     if pd.api.types.is_numeric_dtype(series):
+        return (
+            "id"
+            if _is_id_like(column_name, series)
+            else "numeric"
+        )
 
-        return "id" if _is_id_like(column_name, series) else "numeric"
+    # Native datetime columns.
     if pd.api.types.is_datetime64_any_dtype(series):
         return "datetime"
 
+    # Identifier-like columns.
     if _is_id_like(column_name, series):
         return "id"
 
     # Try detecting dates stored as strings.
-    if series.dtype == "object":
-
+    if pd.api.types.is_object_dtype(series):
         sample = series.dropna().head(100)
 
-        if len(sample) > 0:
-
+        if not sample.empty:
             parsed = pd.to_datetime(
                 sample,
-                errors="coerce"
+                errors="coerce",
             )
 
             valid_ratio = parsed.notna().mean()
@@ -88,8 +93,7 @@ def _classify_column(column_name, series):
                 return "datetime"
 
     # Low-cardinality text is usually categorical.
-    if series.dtype == "object":
-
+    if pd.api.types.is_object_dtype(series):
         unique_count = series.nunique(
             dropna=True
         )
@@ -101,6 +105,7 @@ def _classify_column(column_name, series):
 # ============================================================
 # SAMPLE VALUES
 # ============================================================
+
 def _get_sample_values(series, limit=8):
     """
     Return representative non-null sample values.
@@ -118,24 +123,20 @@ def _get_sample_values(series, limit=8):
 
     for value in values:
 
-        if isinstance(
-            value,
-            (pd.Timestamp,)
-        ):
+        # Convert pandas timestamps to strings.
+        if isinstance(value, pd.Timestamp):
             value = value.isoformat()
 
-        elif hasattr(
-            value,
-            "item"
-        ):
-
+        # Convert NumPy scalar values to native Python values.
+        elif hasattr(value, "item"):
             with contextlib.suppress(Exception):
                 value = value.item()
-        cleaned.append(
-            value
-        )
+
+        cleaned.append(value)
 
     return cleaned
+
+
 # ============================================================
 # NUMERIC SUMMARY
 # ============================================================
@@ -147,7 +148,7 @@ def _numeric_summary(series):
 
     values = pd.to_numeric(
         series,
-        errors="coerce"
+        errors="coerce",
     ).dropna()
 
     if values.empty:
@@ -165,17 +166,14 @@ def _numeric_summary(series):
 # COLUMN PROFILE
 # ============================================================
 
-def profile_column(
-    column_name,
-    series
-):
+def profile_column(column_name, series):
     """
     Create detailed metadata for one column.
     """
 
     kind = _classify_column(
         column_name,
-        series
+        series,
     )
 
     profile = {
@@ -183,17 +181,23 @@ def profile_column(
         "dtype": str(series.dtype),
         "kind": kind,
         "row_count": len(series),
-        "missing_count": int(series.isna().sum()),
-        "missing_percentage": round(float(series.isna().mean() * 100), 2),
-        "unique_count": int(series.nunique(dropna=True)),
-        "sample_values": _get_sample_values(series),
+        "missing_count": int(
+            series.isna().sum()
+        ),
+        "missing_percentage": round(
+            float(series.isna().mean() * 100),
+            2,
+        ),
+        "unique_count": int(
+            series.nunique(dropna=True)
+        ),
+        "sample_values": _get_sample_values(
+            series
+        ),
     }
 
     if kind == "numeric":
-
-        profile[
-            "numeric_summary"
-        ] = _numeric_summary(
+        profile["numeric_summary"] = _numeric_summary(
             series
         )
 
@@ -211,15 +215,19 @@ def create_profile(df):
     This function is intentionally dataset-agnostic.
     """
 
-    if not isinstance(
-        df,
-        pd.DataFrame
-    ):
+    if not isinstance(df, pd.DataFrame):
         raise TypeError(
             "df must be a pandas DataFrame."
         )
 
-    columns = [profile_column(column, df[column]) for column in df.columns]
+    columns = [
+        profile_column(
+            column,
+            df[column],
+        )
+        for column in df.columns
+    ]
+
     numeric_columns = [
         item["name"]
         for item in columns
@@ -268,7 +276,10 @@ def create_profile(df):
         "row_count": len(df),
         "column_count": len(df.columns),
         "columns": columns,
-        "column_names": [str(column) for column in df.columns],
+        "column_names": [
+            str(column)
+            for column in df.columns
+        ],
         "numeric_columns": numeric_columns,
         "categorical_columns": categorical_columns,
         "datetime_columns": datetime_columns,
@@ -286,7 +297,7 @@ def create_profile(df):
 
 def get_profile(df):
     """
-    Backward-compatible alias.
+    Backward-compatible alias for create_profile().
     """
 
     return create_profile(df)
