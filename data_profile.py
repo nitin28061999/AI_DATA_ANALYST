@@ -1,46 +1,112 @@
 import contextlib
+import re
 
 import pandas as pd
+
+
+# ============================================================
+# CONSTANTS
+# ============================================================
+
+_ID_NAME_KEYWORDS = (
+    "id",
+    "code",
+    "number",
+    "no",
+    "invoice",
+    "employee",
+    "customer",
+    "student",
+    "order",
+    "transaction",
+    "account",
+    "reference",
+)
+
+_DATE_NAME_KEYWORDS = (
+    "date",
+    "time",
+    "timestamp",
+    "datetime",
+    "created",
+    "updated",
+    "modified",
+)
+
+_ID_PATTERN = re.compile(
+    r"^[A-Za-z]+\d+$|^\d+[A-Za-z]+$|^[A-Za-z0-9_-]*\d[A-Za-z0-9_-]*$"
+)
 
 
 # ============================================================
 # BASIC COLUMN CLASSIFICATION
 # ============================================================
 
+
 def _is_id_like(column_name, series):
     """
     Detect columns that are likely identifiers.
+
+    Detection uses:
+    - Explicit identifier-related column names.
+    - Highly unique alphanumeric values.
+    - Numeric columns with identifier-like names.
     """
 
-    name = str(column_name).lower()
+    name = str(column_name).strip().lower()
 
-    id_keywords = [
-        "id",
-        "code",
-        "number",
-        "no",
-        "invoice",
-        "employee",
-        "customer",
-        "student",
-        "order",
-        "transaction",
-        "account",
-    ]
-
-    if any(keyword in name for keyword in id_keywords):
+    # Strong name-based detection.
+    if any(keyword in name for keyword in _ID_NAME_KEYWORDS):
         return True
 
-    # Very high-cardinality object columns are often IDs.
-    if series.dtype == "object":
-        unique_ratio = (
-            series.nunique(dropna=True) / max(len(series), 1)
-        )
+    non_null = series.dropna()
 
-        if unique_ratio > 0.95:
-            return True
+    if non_null.empty:
+        return False
+
+    unique_ratio = (
+        non_null.nunique(dropna=True)
+        / max(len(non_null), 1)
+    )
+
+    # High-cardinality text identifiers such as:
+    # A001, A002, A003, ...
+    if (
+        pd.api.types.is_object_dtype(series)
+        or pd.api.types.is_string_dtype(series)
+    ):
+        if unique_ratio >= 0.95 and len(non_null) >= 5:
+            values = non_null.astype(str).str.strip()
+
+            if values.map(
+                lambda value: bool(_ID_PATTERN.match(value))
+            ).mean() >= 0.8:
+                return True
 
     return False
+
+
+def _looks_like_datetime(series):
+    """
+    Detect datetime values stored as strings.
+    """
+
+    non_null = series.dropna()
+
+    if non_null.empty:
+        return False
+
+    sample = non_null.head(100)
+
+    parsed = pd.to_datetime(
+        sample,
+        errors="coerce",
+        format="mixed",
+    )
+
+    valid_ratio = float(parsed.notna().mean())
+
+    return valid_ratio >= 0.8
 
 
 def _classify_column(column_name, series):
@@ -57,47 +123,57 @@ def _classify_column(column_name, series):
     id
     """
 
-    # Check boolean before numeric.
+    name = str(column_name).strip().lower()
+
+    # Boolean must be checked before numeric.
     if pd.api.types.is_bool_dtype(series):
         return "boolean"
-
-    # Numeric columns.
-    if pd.api.types.is_numeric_dtype(series):
-        return (
-            "id"
-            if _is_id_like(column_name, series)
-            else "numeric"
-        )
 
     # Native datetime columns.
     if pd.api.types.is_datetime64_any_dtype(series):
         return "datetime"
 
+    # Date-like column names get an early datetime check.
+    if (
+        any(keyword in name for keyword in _DATE_NAME_KEYWORDS)
+        and (
+            pd.api.types.is_object_dtype(series)
+            or pd.api.types.is_string_dtype(series)
+        )
+    ):
+        if _looks_like_datetime(series):
+            return "datetime"
+
+    # Numeric columns.
+    if pd.api.types.is_numeric_dtype(series):
+        return "id" if _is_id_like(column_name, series) else "numeric"
+    # Detect string dates even when the column name is generic.
+    if (
+        pd.api.types.is_object_dtype(series)
+        or pd.api.types.is_string_dtype(series)
+    ):
+        if _looks_like_datetime(series):
+            return "datetime"
+
     # Identifier-like columns.
     if _is_id_like(column_name, series):
         return "id"
 
-    # Try detecting dates stored as strings.
-    if pd.api.types.is_object_dtype(series):
-        sample = series.dropna().head(100)
-
-        if not sample.empty:
-            parsed = pd.to_datetime(
-                sample,
-                errors="coerce",
-            )
-
-            valid_ratio = parsed.notna().mean()
-
-            if valid_ratio >= 0.8:
-                return "datetime"
-
-    # Low-cardinality text is usually categorical.
-    if pd.api.types.is_object_dtype(series):
-        unique_count = series.nunique(
-            dropna=True
+    # Text / categorical classification.
+    if (
+        pd.api.types.is_object_dtype(series)
+        or pd.api.types.is_string_dtype(series)
+    ):
+        unique_count = int(
+            series.nunique(dropna=True)
         )
 
+        # A low-cardinality string column is categorical.
+        #
+        # This intentionally does not depend on dataset size.
+        # For example:
+        # ["North", "South", "North", "East"]
+        # is categorical even though the dataset has only 4 rows.
         return "categorical" if unique_count <= 100 else "text"
     return "text"
 
@@ -105,6 +181,7 @@ def _classify_column(column_name, series):
 # ============================================================
 # SAMPLE VALUES
 # ============================================================
+
 
 def _get_sample_values(series, limit=8):
     """
@@ -141,6 +218,7 @@ def _get_sample_values(series, limit=8):
 # NUMERIC SUMMARY
 # ============================================================
 
+
 def _numeric_summary(series):
     """
     Create a small numeric summary.
@@ -165,6 +243,7 @@ def _numeric_summary(series):
 # ============================================================
 # COLUMN PROFILE
 # ============================================================
+
 
 def profile_column(column_name, series):
     """
@@ -207,6 +286,7 @@ def profile_column(column_name, series):
 # ============================================================
 # DATASET PROFILE
 # ============================================================
+
 
 def create_profile(df):
     """
@@ -294,6 +374,7 @@ def create_profile(df):
 # ============================================================
 # BACKWARD COMPATIBILITY
 # ============================================================
+
 
 def get_profile(df):
     """

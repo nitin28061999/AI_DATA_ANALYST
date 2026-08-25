@@ -1,17 +1,35 @@
 ﻿import pandas as pd
 import pytest
 
-from analysis_tools import apply_filters, filtered_sum
-from analyst import normalize_filters
+from analysis_tools import (
+    apply_filters,
+    filtered_sum,
+    normalize_filters,
+)
 
 
 @pytest.fixture
 def multi_filter_df() -> pd.DataFrame:
     return pd.DataFrame(
         {
-            "Region": ["North", "North", "South", "East"],
-            "Category": ["A", "B", "A", "B"],
-            "Sales": [100.0, 200.0, 150.0, 300.0],
+            "Region": [
+                "North",
+                "North",
+                "South",
+                "East",
+            ],
+            "Category": [
+                "A",
+                "B",
+                "A",
+                "B",
+            ],
+            "Sales": [
+                100.0,
+                200.0,
+                150.0,
+                300.0,
+            ],
         }
     )
 
@@ -20,7 +38,9 @@ def multi_filter_df() -> pd.DataFrame:
 # MULTIPLE FILTER TESTS
 # ============================================================
 
-def test_multiple_filters_and_logic(multi_filter_df):
+def test_multiple_filters_and_logic(
+    multi_filter_df,
+):
     filters = [
         {
             "column": "Region",
@@ -43,7 +63,9 @@ def test_multiple_filters_and_logic(multi_filter_df):
     assert result.iloc[0]["Sales"] == 100.0
 
 
-def test_filtered_sum_with_multiple_filters(multi_filter_df):
+def test_filtered_sum_with_multiple_filters(
+    multi_filter_df,
+):
     filters = [
         {
             "column": "Region",
@@ -76,6 +98,7 @@ def test_filtered_sum_with_multiple_filters(multi_filter_df):
         ("=", "="),
         ("==", "="),
         ("===", "="),
+        ("====", "="),
         ("eq", "="),
         ("equals", "="),
         ("equal", "="),
@@ -116,7 +139,7 @@ def test_operator_aliases_are_normalized(
 
     normalized = normalize_filters(
         multi_filter_df,
-        filters, # pyright: ignore[reportArgumentType]
+        filters,
     )
 
     assert len(normalized) == 1
@@ -127,7 +150,9 @@ def test_operator_aliases_are_normalized(
 # OPERATOR EXECUTION TESTS
 # ============================================================
 
-def test_equal_alias_filter(multi_filter_df):
+def test_equal_alias_filter(
+    multi_filter_df,
+):
     filters = [
         {
             "column": "Region",
@@ -144,7 +169,9 @@ def test_equal_alias_filter(multi_filter_df):
     assert len(result) == 2
 
 
-def test_greater_than_or_equal_alias_filter(multi_filter_df):
+def test_greater_than_or_equal_alias_filter(
+    multi_filter_df,
+):
     filters = [
         {
             "column": "Sales",
@@ -159,10 +186,16 @@ def test_greater_than_or_equal_alias_filter(multi_filter_df):
     )
 
     assert len(result) == 2
-    assert result["Sales"].tolist() == [200.0, 300.0]
+
+    assert result["Sales"].tolist() == [
+        200.0,
+        300.0,
+    ]
 
 
-def test_less_than_alias_filter(multi_filter_df):
+def test_less_than_alias_filter(
+    multi_filter_df,
+):
     filters = [
         {
             "column": "Sales",
@@ -177,18 +210,24 @@ def test_less_than_alias_filter(multi_filter_df):
     )
 
     assert len(result) == 2
-    assert result["Sales"].tolist() == [100.0, 150.0]
+
+    assert result["Sales"].tolist() == [
+        100.0,
+        150.0,
+    ]
 
 
 # ============================================================
 # INVALID FILTER TESTS
 # ============================================================
 
-def test_invalid_operator_is_rejected(multi_filter_df):
+def test_invalid_operator_is_rejected(
+    multi_filter_df,
+):
     filters = [
         {
             "column": "Sales",
-            "operator": "contains",
+            "operator": "unsupported_operator",
             "value": 100,
         }
     ]
@@ -199,7 +238,7 @@ def test_invalid_operator_is_rejected(multi_filter_df):
     ):
         normalize_filters(
             multi_filter_df,
-            filters, # pyright: ignore[reportArgumentType]
+            filters,
         )
 
 
@@ -216,7 +255,7 @@ def test_unknown_column_is_ignored_by_normalize_filters(
 
     normalized = normalize_filters(
         multi_filter_df,
-        filters, # pyright: ignore[reportArgumentType]
+        filters,
     )
 
     assert normalized == []

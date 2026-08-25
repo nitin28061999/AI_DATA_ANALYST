@@ -133,7 +133,6 @@ class GeminiPlan(BaseModel):
 # ============================================================
 
 from dotenv import load_dotenv
-from google import genai
 
 load_dotenv()
 
@@ -147,18 +146,25 @@ if not MODEL_NAME:
         "GEMINI_MODEL cannot be empty."
     )
 
-GEMINI_API_KEY = os.getenv(
-    "GEMINI_API_KEY"
-)
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
-if not GEMINI_API_KEY:
-    raise ValueError(
-        "GEMINI_API_KEY is missing from the environment or .env file."
-    )
 
-client = genai.Client(
-    api_key=GEMINI_API_KEY
-)
+def get_gemini_client():
+    """Create the Gemini client only when a Gemini call is needed."""
+    if not GEMINI_API_KEY:
+        raise ValueError(
+            "GEMINI_API_KEY is missing from the environment or .env file."
+        )
+
+    try:
+        from google import genai
+    except ImportError as exc:
+        raise ImportError(
+            "The Gemini SDK is not installed. Install dependencies with "
+            "`pip install -r requirements.txt`."
+        ) from exc
+
+    return genai.Client(api_key=GEMINI_API_KEY)
 
 
 # ============================================================
@@ -1591,12 +1597,49 @@ def normalize_filters(
     filters: Any,
     df: Optional[pd.DataFrame] = None,
 ) -> List[Dict[str, Any]]:
-    """Validate and normalize filter dictionaries for DataFrame filtering."""
+    """Normalize filter dictionaries with support for both calling conventions.
+
+    Preferred:
+        normalize_filters(filters, df)
+
+    Backward-compatible:
+        normalize_filters(df, filters)
+
+    Unknown columns are skipped when a DataFrame is supplied so a single
+    hallucinated filter does not crash plan normalization. Final plan
+    validation still rejects invalid columns at the execution boundary.
+    """
+    # Backward-compatible argument order used by older tests/callers.
+    if isinstance(filters, pd.DataFrame) and isinstance(df, list):
+        filters, df = df, filters
+
     if not isinstance(filters, list):
         raise ValueError("Filters must be a list.")
 
     if not filters:
         raise ValueError("At least one filter is required.")
+
+    aliases = {
+        "==": "=",
+        "eq": "=",
+        "equals": "=",
+        "equal": "=",
+        "ne": "!=",
+        "not equal": "!=",
+        "not_equal": "!=",
+        "gt": ">",
+        "greater than": ">",
+        "greater_than": ">",
+        "gte": ">=",
+        "greater than or equal": ">=",
+        "greater_than_or_equal": ">=",
+        "lt": "<",
+        "less than": "<",
+        "less_than": "<",
+        "lte": "<=",
+        "less than or equal": "<=",
+        "less_than_or_equal": "<=",
+    }
 
     result: List[Dict[str, Any]] = []
 
@@ -1604,48 +1647,53 @@ def normalize_filters(
         if not isinstance(item, dict):
             raise ValueError(f"Filter #{index + 1} must be a dictionary.")
 
-        if "column" not in item or not item["column"]:
-            raise ValueError(f"Filter #{index + 1} has an empty or missing 'column'.")
+        column = item.get("column")
+        if not column:
+            raise ValueError(
+                f"Filter #{index + 1} has an empty or missing 'column'."
+            )
 
         if "value" not in item:
             raise ValueError(f"Filter #{index + 1} is missing 'value'.")
 
-        column = item["column"]
-
-        # Validate column presence if DataFrame is provided
         if df is not None and column not in df.columns:
-            raise ValueError(f"Column '{column}' not found in DataFrame.")
+            continue
 
-        # Normalize operator
         raw_op = str(item.get("operator", "=") or "=").strip().lower()
-        operator = "=" if raw_op == "==" else raw_op
+        if raw_op and set(raw_op) == {"="}:
+            operator = "="
+        else:
+            operator = aliases.get(raw_op, raw_op)
 
         if operator not in FILTER_OPERATORS:
             raise ValueError(f"Unsupported filter operator '{operator}'.")
 
         value = item["value"]
 
-        # Operator-specific normalization & validation
         if operator == "between":
             if not isinstance(value, (list, tuple)) or len(value) != 2:
-                raise ValueError("The 'between' filter requires a list/tuple of exactly two values.")
-            
+                raise ValueError(
+                    "The 'between' filter requires a list/tuple of exactly two values."
+                )
             if df is not None:
-                value = [_coerce(value[0], df[column]), _coerce(value[1], df[column])]
+                value = [
+                    _coerce(value[0], df[column]),
+                    _coerce(value[1], df[column]),
+                ]
             else:
                 value = list(value)
-
         elif operator == "contains":
             value = str(value).strip()
-
         elif df is not None:
             value = _coerce(value, df[column])
 
-        result.append({
-            "column": column,
-            "operator": operator,
-            "value": value,
-        })
+        result.append(
+            {
+                "column": column,
+                "operator": operator,
+                "value": value,
+            }
+        )
 
     return result
 
@@ -2673,7 +2721,7 @@ RULES:
 11. Return exactly one operation.
 """
 
-    response = client.models.generate_content(
+    response = get_gemini_client().models.generate_content(
         model=MODEL_NAME,
         contents=prompt,
         config={
@@ -3111,7 +3159,7 @@ RULES:
 """
 
     try:
-        response = client.models.generate_content(
+        response = get_gemini_client().models.generate_content(
             model=MODEL_NAME,
             contents=prompt,
         )

@@ -341,9 +341,12 @@ def calculate_average(
 
 def calculate_count(
     df: pd.DataFrame,
-    column: str,
+    column: str | None = None,
 ) -> int:
-    """Count non-null values in a column."""
+    """Count rows, or non-null values when a column is supplied."""
+    validate_dataframe(df)
+    if column is None:
+        return int(len(df))
     validate_column(df, column)
     return int(df[column].count())
 
@@ -646,13 +649,14 @@ def filtered_average(
 def filtered_count(
     df: pd.DataFrame,
     filters: list,
-    count_column: str,
+    count_column: str | None = None,
 ) -> int:
-    """Count non-null values after applying filters."""
-    validate_column(df, count_column)
+    """Count filtered rows, or non-null values in a supplied column."""
     filtered_df = apply_filters(df, filters)
-
-    return 0 if filtered_df.empty else int(filtered_df[count_column].count())
+    if count_column is None:
+        return int(len(filtered_df))
+    validate_column(df, count_column)
+    return int(filtered_df[count_column].count())
 
 
 def filtered_unique_count(

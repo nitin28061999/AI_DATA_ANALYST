@@ -4,7 +4,6 @@ import os
 import re
 
 from dotenv import load_dotenv
-from google import genai
 
 
 # ============================================================
@@ -15,19 +14,31 @@ load_dotenv()
 
 API_KEY = os.getenv("GEMINI_API_KEY")
 
-if not API_KEY:
-    raise ValueError(
-        "GEMINI_API_KEY is missing from .env"
-    )
-
 
 # ============================================================
 # GEMINI CLIENT
 # ============================================================
 
-client = genai.Client(
-    api_key=API_KEY
-)
+def get_client():
+    """Create the Gemini client only when an AI call is requested.
+
+    Keeping SDK import and client creation lazy allows local/unit tests and
+    non-AI utilities to run without a configured Gemini environment.
+    """
+    if not API_KEY:
+        raise ValueError(
+            "GEMINI_API_KEY is missing from .env or the environment."
+        )
+
+    try:
+        from google import genai
+    except ImportError as exc:
+        raise ImportError(
+            "The Gemini SDK is not installed. Install dependencies with "
+            "`pip install -r requirements.txt`."
+        ) from exc
+
+    return genai.Client(api_key=API_KEY)
 
 
 # ============================================================
@@ -622,7 +633,7 @@ Examples:
 21. Return exactly ONE JSON object.
 """
 
-    response = client.models.generate_content(
+    response = get_client().models.generate_content(
         model=MODEL_NAME,
         contents=prompt
     )
@@ -736,7 +747,7 @@ RULES:
 22. Return only the final natural-language answer.
 """
 
-    response = client.models.generate_content(
+    response = get_client().models.generate_content(
         model=MODEL_NAME,
         contents=prompt
     )

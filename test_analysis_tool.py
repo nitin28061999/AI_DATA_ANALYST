@@ -24,7 +24,7 @@ from analysis_tools import (
     filtered_group_and_average,
     filtered_value_counts,
     filtered_top_n,
-    normalize_filters, # pyright: ignore[reportAttributeAccessIssue]
+    normalize_filters,
     validate_dataframe,
 )
 
@@ -65,33 +65,47 @@ def sample_dataframe() -> pd.DataFrame:
 # DATAFRAME VALIDATION
 # ============================================================
 
+
 class TestDataFrameValidation:
 
-    def test_validate_dataframe_valid(self, sample_dataframe):
-        assert validate_dataframe(sample_dataframe) is None
+    def test_validate_dataframe_valid(
+        self,
+        sample_dataframe,
+    ):
+        assert validate_dataframe(
+            sample_dataframe
+        ) is None
 
     def test_validate_dataframe_empty(self):
         with pytest.raises(
             ValueError,
-            match="Provided DataFrame is empty",
+            match="The dataset is empty",
         ):
-            validate_dataframe(pd.DataFrame())
+            validate_dataframe(
+                pd.DataFrame()
+            )
 
     def test_validate_dataframe_invalid_type(self):
         with pytest.raises(
             TypeError,
-            match="valid pandas DataFrame",
+            match="df must be a pandas DataFrame",
         ):
-            validate_dataframe([1, 2, 3]) # pyright: ignore[reportArgumentType]
+            validate_dataframe(
+                [1, 2, 3]  # pyright: ignore[reportArgumentType]
+            )
 
 
 # ============================================================
 # FILTER NORMALIZATION
 # ============================================================
 
+
 class TestFilterNormalization:
 
-    def test_equals_operator(self, sample_dataframe):
+    def test_equals_operator(
+        self,
+        sample_dataframe,
+    ):
         filters = [
             {
                 "column": "Region",
@@ -107,7 +121,10 @@ class TestFilterNormalization:
 
         assert result[0]["operator"] == "="
 
-    def test_eq_alias(self, sample_dataframe):
+    def test_eq_alias(
+        self,
+        sample_dataframe,
+    ):
         filters = [
             {
                 "column": "Region",
@@ -123,7 +140,10 @@ class TestFilterNormalization:
 
         assert result[0]["operator"] == "="
 
-    def test_greater_than_alias(self, sample_dataframe):
+    def test_greater_than_alias(
+        self,
+        sample_dataframe,
+    ):
         filters = [
             {
                 "column": "Sales",
@@ -139,7 +159,10 @@ class TestFilterNormalization:
 
         assert result[0]["operator"] == ">"
 
-    def test_greater_than_or_equal_alias(self, sample_dataframe):
+    def test_greater_than_or_equal_alias(
+        self,
+        sample_dataframe,
+    ):
         filters = [
             {
                 "column": "Sales",
@@ -155,7 +178,10 @@ class TestFilterNormalization:
 
         assert result[0]["operator"] == ">="
 
-    def test_less_than_alias(self, sample_dataframe):
+    def test_less_than_alias(
+        self,
+        sample_dataframe,
+    ):
         filters = [
             {
                 "column": "Sales",
@@ -171,7 +197,10 @@ class TestFilterNormalization:
 
         assert result[0]["operator"] == "<"
 
-    def test_less_than_or_equal_alias(self, sample_dataframe):
+    def test_less_than_or_equal_alias(
+        self,
+        sample_dataframe,
+    ):
         filters = [
             {
                 "column": "Sales",
@@ -187,7 +216,10 @@ class TestFilterNormalization:
 
         assert result[0]["operator"] == "<="
 
-    def test_not_equal_alias(self, sample_dataframe):
+    def test_not_equal_alias(
+        self,
+        sample_dataframe,
+    ):
         filters = [
             {
                 "column": "Region",
@@ -266,7 +298,7 @@ class TestFilterNormalization:
         filters = [
             {
                 "column": "Region",
-                "operator": "contains",
+                "operator": "unsupported_operator",
                 "value": "North",
             }
         ]
@@ -284,6 +316,7 @@ class TestFilterNormalization:
 # ============================================================
 # FILTER ENGINE
 # ============================================================
+
 
 class TestFilterEngine:
 
@@ -305,6 +338,7 @@ class TestFilterEngine:
         )
 
         assert len(result) == 3
+
         assert result["Sales"].tolist() == [
             100.0,
             200.0,
@@ -444,6 +478,7 @@ class TestFilterEngine:
         )
 
         assert len(result) == 2
+
         assert result["Sales"].tolist() == [
             100.0,
             200.0,
@@ -454,9 +489,13 @@ class TestFilterEngine:
 # BASIC AGGREGATIONS
 # ============================================================
 
+
 class TestAggregations:
 
-    def test_calculate_sum(self, sample_dataframe):
+    def test_calculate_sum(
+        self,
+        sample_dataframe,
+    ):
         result = calculate_sum(
             sample_dataframe,
             "Sales",
@@ -464,7 +503,10 @@ class TestAggregations:
 
         assert result == 920.0
 
-    def test_calculate_average(self, sample_dataframe):
+    def test_calculate_average(
+        self,
+        sample_dataframe,
+    ):
         result = calculate_average(
             sample_dataframe,
             "Sales",
@@ -474,10 +516,13 @@ class TestAggregations:
             920.0 / 6
         )
 
-    def test_calculate_count(self, sample_dataframe):
+    def test_calculate_count(
+        self,
+        sample_dataframe,
+    ):
         result = calculate_count(
             sample_dataframe,
-        ) # pyright: ignore[reportCallIssue]
+        )
 
         assert result == 6
 
@@ -503,7 +548,10 @@ class TestAggregations:
 
         assert result == 3
 
-    def test_calculate_min(self, sample_dataframe):
+    def test_calculate_min(
+        self,
+        sample_dataframe,
+    ):
         result = calculate_min(
             sample_dataframe,
             "Sales",
@@ -511,7 +559,10 @@ class TestAggregations:
 
         assert result == 50.0
 
-    def test_calculate_max(self, sample_dataframe):
+    def test_calculate_max(
+        self,
+        sample_dataframe,
+    ):
         result = calculate_max(
             sample_dataframe,
             "Sales",
@@ -524,18 +575,26 @@ class TestAggregations:
 # GROUPED OPERATIONS
 # ============================================================
 
+
 class TestGroupedOperations:
 
-    def test_group_and_sum(self, sample_dataframe):
+    def test_group_and_sum(
+        self,
+        sample_dataframe,
+    ):
         result = group_and_sum(
             sample_dataframe,
             "Region",
             "Sales",
         )
 
-        assert result["North"] == 600.0 # pyright: ignore[reportGeneralTypeIssues]
-        assert result["South"] == 270.0 # pyright: ignore[reportGeneralTypeIssues]
-        assert result["East"] == 50.0 # pyright: ignore[reportGeneralTypeIssues]
+        result = result.set_index(
+            "Region"
+        )["Sales"]
+
+        assert result["North"] == 600.0
+        assert result["South"] == 270.0
+        assert result["East"] == 50.0
 
     def test_group_and_average(
         self,
@@ -547,9 +606,13 @@ class TestGroupedOperations:
             "Sales",
         )
 
-        assert result["North"] == 200.0 # pyright: ignore[reportGeneralTypeIssues]
-        assert result["South"] == 135.0 # pyright: ignore[reportGeneralTypeIssues]
-        assert result["East"] == 50.0 # pyright: ignore[reportGeneralTypeIssues]
+        result = result.set_index(
+            "Region"
+        )["Sales"]
+
+        assert result["North"] == 200.0
+        assert result["South"] == 135.0
+        assert result["East"] == 50.0
 
     def test_group_and_count(
         self,
@@ -560,11 +623,18 @@ class TestGroupedOperations:
             "Region",
         )
 
-        assert result["North"] == 3 # pyright: ignore[reportGeneralTypeIssues]
-        assert result["South"] == 2 # pyright: ignore[reportGeneralTypeIssues]
-        assert result["East"] == 1 # pyright: ignore[reportGeneralTypeIssues]
+        result = result.set_index(
+            "Region"
+        )["Count"]
 
-    def test_top_n(self, sample_dataframe):
+        assert result["North"] == 3
+        assert result["South"] == 2
+        assert result["East"] == 1
+
+    def test_top_n(
+        self,
+        sample_dataframe,
+    ):
         result = top_n(
             sample_dataframe,
             "Region",
@@ -572,34 +642,45 @@ class TestGroupedOperations:
             2,
         )
 
-        assert result.index.tolist() == [
+        assert result["Region"].tolist() == [
             "North",
             "South",
         ]
 
-        assert result.tolist() == [ # pyright: ignore[reportCallIssue]
+        assert result["Sales"].tolist() == [
             600.0,
             270.0,
         ]
 
-    def test_value_counts(self, sample_dataframe):
+    def test_value_counts(
+        self,
+        sample_dataframe,
+    ):
         result = value_counts(
             sample_dataframe,
             "Region",
         )
 
-        assert result["North"] == 3 # pyright: ignore[reportGeneralTypeIssues]
-        assert result["South"] == 2 # pyright: ignore[reportGeneralTypeIssues]
-        assert result["East"] == 1 # pyright: ignore[reportGeneralTypeIssues]
+        result = result.set_index(
+            "Region"
+        )["Count"]
+
+        assert result["North"] == 3
+        assert result["South"] == 2
+        assert result["East"] == 1
 
 
 # ============================================================
 # FILTERED AGGREGATIONS
 # ============================================================
 
+
 class TestFilteredAggregations:
 
-    def test_filtered_sum(self, sample_dataframe):
+    def test_filtered_sum(
+        self,
+        sample_dataframe,
+    ):
         filters = [
             {
                 "column": "Region",
@@ -651,7 +732,7 @@ class TestFilteredAggregations:
         result = filtered_count(
             sample_dataframe,
             filters,
-        ) # pyright: ignore[reportCallIssue]
+        )
 
         assert result == 3
 
@@ -673,7 +754,7 @@ class TestFilteredAggregations:
             "Region",
         )
 
-        assert result == 3
+        assert result == 2
 
     def test_filtered_min(
         self,
@@ -720,6 +801,7 @@ class TestFilteredAggregations:
 # FILTERED GROUP OPERATIONS
 # ============================================================
 
+
 class TestFilteredGroupedOperations:
 
     def test_filtered_group_and_sum(
@@ -741,8 +823,12 @@ class TestFilteredGroupedOperations:
             "Sales",
         )
 
-        assert result["North"] == 300.0 # pyright: ignore[reportGeneralTypeIssues]
-        assert result["South"] == 120.0 # pyright: ignore[reportGeneralTypeIssues]
+        result = result.set_index(
+            "Region"
+        )["Sales"]
+
+        assert result["North"] == 300.0
+        assert result["South"] == 120.0
 
     def test_filtered_group_and_average(
         self,
@@ -763,8 +849,12 @@ class TestFilteredGroupedOperations:
             "Sales",
         )
 
-        assert result["North"] == 150.0 # pyright: ignore[reportGeneralTypeIssues]
-        assert result["South"] == 120.0 # pyright: ignore[reportGeneralTypeIssues]
+        result = result.set_index(
+            "Region"
+        )["Sales"]
+
+        assert result["North"] == 150.0
+        assert result["South"] == 120.0
 
     def test_filtered_value_counts(
         self,
@@ -784,8 +874,12 @@ class TestFilteredGroupedOperations:
             "Category",
         )
 
-        assert result["A"] == 3 # pyright: ignore[reportGeneralTypeIssues]
-        assert result["B"] == 2 # pyright: ignore[reportGeneralTypeIssues]
+        result = result.set_index(
+            "Category"
+        )["Count"]
+
+        assert result["A"] == 3
+        assert result["B"] == 2
 
     def test_filtered_top_n(
         self,
@@ -807,12 +901,12 @@ class TestFilteredGroupedOperations:
             2,
         )
 
-        assert result.index.tolist() == [
+        assert result["Region"].tolist() == [
             "North",
             "South",
         ]
 
-        assert result.tolist() == [ # pyright: ignore[reportCallIssue]
+        assert result["Sales"].tolist() == [
             300.0,
             120.0,
         ]
