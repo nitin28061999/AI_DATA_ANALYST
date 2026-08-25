@@ -1589,147 +1589,63 @@ def _extract_filters(
 
 def normalize_filters(
     filters: Any,
-    df: Optional[
-        pd.DataFrame
-    ] = None,
+    df: Optional[pd.DataFrame] = None,
 ) -> List[Dict[str, Any]]:
-    """
-    Validate and normalize filters.
-    """
-
-    if not isinstance(
-        filters,
-        list,
-    ):
-        raise ValueError(
-            "Filters must be a list."
-        )
+    """Validate and normalize filter dictionaries for DataFrame filtering."""
+    if not isinstance(filters, list):
+        raise ValueError("Filters must be a list.")
 
     if not filters:
-        raise ValueError(
-            "At least one filter is required."
-        )
+        raise ValueError("At least one filter is required.")
 
-    result: List[
-        Dict[str, Any]
-    ] = []
+    result: List[Dict[str, Any]] = []
 
-    for index, item in enumerate(
-        filters
-    ):
+    for index, item in enumerate(filters):
+        if not isinstance(item, dict):
+            raise ValueError(f"Filter #{index + 1} must be a dictionary.")
 
-        if not isinstance(
-            item,
-            dict,
-        ):
-            raise ValueError(
-                f"Filter #{index + 1} "
-                "must be a dictionary."
-            )
-
-        if "column" not in item:
-            raise ValueError(
-                f"Filter #{index + 1} "
-                "is missing 'column'."
-            )
+        if "column" not in item or not item["column"]:
+            raise ValueError(f"Filter #{index + 1} has an empty or missing 'column'.")
 
         if "value" not in item:
-            raise ValueError(
-                f"Filter #{index + 1} "
-                "is missing 'value'."
-            )
+            raise ValueError(f"Filter #{index + 1} is missing 'value'.")
 
-        column = item[
-            "column"
-        ]
+        column = item["column"]
 
-        if not column:
-            raise ValueError(
-                f"Filter #{index + 1} "
-                "has an empty column."
-            )
+        # Validate column presence if DataFrame is provided
+        if df is not None and column not in df.columns:
+            raise ValueError(f"Column '{column}' not found in DataFrame.")
 
-        operator = str(
-            item.get(
-                "operator",
-                "=",
-            )
-            or "="
-        ).strip().lower()
-
-        if operator == "==":
-            operator = "="
+        # Normalize operator
+        raw_op = str(item.get("operator", "=") or "=").strip().lower()
+        operator = "=" if raw_op == "==" else raw_op
 
         if operator not in FILTER_OPERATORS:
-            raise ValueError(
-                f"Unsupported filter "
-                f"operator '{operator}'."
-            )
+            raise ValueError(f"Unsupported filter operator '{operator}'.")
 
-        value = item[
-            "value"
-        ]
+        value = item["value"]
 
+        # Operator-specific normalization & validation
         if operator == "between":
-
-            if not isinstance(
-                value,
-                (list, tuple),
-            ):
-                raise ValueError(
-                    "The 'between' filter "
-                    "requires exactly two values."
-                )
-
-            if len(value) != 2:
-                raise ValueError(
-                    "The 'between' filter "
-                    "requires exactly two values."
-                )
-
-            value = [
-                value[0],
-                value[1],
-            ]
-
-        if (
-            df is not None
-            and column in df.columns
-        ):
-
-            if operator == "between":
-
-                value = [
-                    _coerce(
-                        value[0],
-                        df[column],
-                    ),
-                    _coerce(
-                        value[1],
-                        df[column],
-                    ),
-                ]
-
-            elif operator == "contains":
-
-                value = str(
-                    value
-                ).strip()
-
+            if not isinstance(value, (list, tuple)) or len(value) != 2:
+                raise ValueError("The 'between' filter requires a list/tuple of exactly two values.")
+            
+            if df is not None:
+                value = [_coerce(value[0], df[column]), _coerce(value[1], df[column])]
             else:
+                value = list(value)
 
-                value = _coerce(
-                    value,
-                    df[column],
-                )
+        elif operator == "contains":
+            value = str(value).strip()
 
-        result.append(
-            {
-                "column": column,
-                "operator": operator,
-                "value": value,
-            }
-        )
+        elif df is not None:
+            value = _coerce(value, df[column])
+
+        result.append({
+            "column": column,
+            "operator": operator,
+            "value": value,
+        })
 
     return result
 
