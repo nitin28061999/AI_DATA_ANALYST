@@ -1,9 +1,13 @@
-﻿
-from typing import Any, Dict
-
+﻿from typing import Any, Dict, List, Optional, cast
 import pandas as pd
 
 from analysis_tools import (
+    calculate_average,
+    calculate_count,
+    calculate_max,
+    calculate_min,
+    calculate_sum,
+    calculate_unique_count,
     filtered_average,
     filtered_count,
     filtered_group_and_average,
@@ -20,18 +24,11 @@ from analysis_tools import (
     normalize_filters,
     top_n,
     value_counts,
-    calculate_average,
-    calculate_count,
-    calculate_max,
-    calculate_min,
-    calculate_sum,
-    calculate_unique_count,
     validate_dataframe,
 )
 
-
 # ============================================================
-# SUPPORTED OPERATIONS
+# SUPPORTED OPERATIONS & REQUIREMENTS
 # ============================================================
 
 SUPPORTED_OPERATIONS = {
@@ -48,371 +45,162 @@ SUPPORTED_OPERATIONS = {
     "top_n",
 }
 
+OPERATIONS_REQUIRING_COLUMN = {
+    "sum",
+    "average",
+    "unique_count",
+    "min",
+    "max",
+    "group_sum",
+    "group_average",
+    "top_n",
+}
+
+OPERATIONS_REQUIRING_GROUP_BY = {
+    "group_sum",
+    "group_average",
+    "group_count",
+    "top_n",
+}
+
 
 # ============================================================
 # QUERY VALIDATION
 # ============================================================
 
-def validate_query(
-    query: Any,
-) -> Dict[str, Any]:
+def validate_query(query: Any) -> Dict[str, Any]:
     """
-    Validate and normalize a query definition.
-
-    Expected query structure:
-
-        {
-            "operation": "sum",
-            "column": "Sales",
-            "filters": [...]
-        }
-
-    Grouped operations additionally require:
-
-        "group_by": "Region"
-
-    top_n additionally requires:
-
-        "n": 5
+    Validate and normalize a query definition dictionary.
     """
-
     if not isinstance(query, dict):
-        raise ValueError(
-            "Query must be a dictionary."
-        )
+        raise ValueError("Query must be a dictionary.")
 
     if "operation" not in query:
-        raise ValueError(
-            "Query is missing 'operation'."
-        )
+        raise ValueError("Query is missing 'operation'.")
 
-    operation = str(
-        query["operation"]
-    ).strip().lower()
+    operation = str(query["operation"]).strip().lower()
 
     if not operation:
-        raise ValueError(
-            "Query operation cannot be empty."
-        )
+        raise ValueError("Query operation cannot be empty.")
 
     if operation not in SUPPORTED_OPERATIONS:
-        raise ValueError(
-            f"Unsupported query operation "
-            f"'{operation}'."
-        )
+        raise ValueError(f"Unsupported query operation '{operation}'.")
 
-    result = dict(query)
+    result: Dict[str, Any] = dict(query)
     result["operation"] = operation
 
-    operations_requiring_column = {
-        "sum",
-        "average",
-        "unique_count",
-        "min",
-        "max",
-        "group_sum",
-        "group_average",
-        "top_n",
-    }
+    # Validate column requirements
+    if operation in OPERATIONS_REQUIRING_COLUMN:
+        if "column" not in query or not query["column"]:
+            raise ValueError(f"Operation '{operation}' requires a non-empty 'column'.")
 
-    if operation in operations_requiring_column:
-        if "column" not in query:
-            raise ValueError(
-                "Query is missing 'column'."
-            )
+    # Validate group_by requirements
+    if operation in OPERATIONS_REQUIRING_GROUP_BY:
+        if "group_by" not in query or not query["group_by"]:
+            raise ValueError(f"Operation '{operation}' requires a non-empty 'group_by'.")
 
-        if not query["column"]:
-            raise ValueError(
-                "Query has an empty 'column'."
-            )
-
-    operations_requiring_group_by = {
-        "group_sum",
-        "group_average",
-        "group_count",
-        "top_n",
-    }
-
-    if operation in operations_requiring_group_by:
-        if "group_by" not in query:
-            raise ValueError(
-                "Query is missing 'group_by'."
-            )
-
-        if not query["group_by"]:
-            raise ValueError(
-                "Query has an empty 'group_by'."
-            )
-
+    # Validate top_n parameters
     if operation == "top_n":
         if "n" not in query:
-            raise ValueError(
-                "Query is missing 'n'."
-            )
-
+            raise ValueError("Query is missing 'n'.")
         try:
             n = int(query["n"])
-        except (
-            TypeError,
-            ValueError,
-        ) as exc:
-            raise ValueError(
-                "Query 'n' must be an integer."
-            ) from exc
+        except (TypeError, ValueError) as exc:
+            raise ValueError("Query 'n' must be an integer.") from exc
 
         if n <= 0:
-            raise ValueError(
-                "Query 'n' must be greater than zero."
-            )
+            raise ValueError("Query 'n' must be greater than zero.")
 
         result["n"] = n
 
+    # Validate filters parameter if provided
     if "filters" in query:
         filters = query["filters"]
-
         if not isinstance(filters, list):
-            raise ValueError(
-                "Query 'filters' must be a list."
-            )
-
+            raise ValueError("Query 'filters' must be a list.")
         result["filters"] = filters
 
     return result
 
 
 # ============================================================
-# QUERY EXECUTION
+# QUERY EXECUTION ENGINE
 # ============================================================
 
-def execute_query(
-    df: pd.DataFrame,
-    query: Dict[str, Any],
-) -> Any:    # sourcery skip: low-code-quality
+def execute_query(df: pd.DataFrame, query: Dict[str, Any]) -> Any:
+    # sourcery skip: low-code-quality
     """
-    Execute a validated analysis query against a DataFrame.
-
-    The query engine acts as a dispatcher between the query
-    definition and the functions implemented in analysis_tools.
+    Execute a validated analysis query against a pandas DataFrame.
     """
-
     validate_dataframe(df)
+    normalized_query = validate_query(query)
 
-    normalized_query = validate_query(
-        query
-    )
+    operation: str = normalized_query["operation"]
+    column: Optional[str] = normalized_query.get("column")
+    group_by: Optional[str] = normalized_query.get("group_by")
+    n: Optional[int] = normalized_query.get("n")
+    filters: Optional[List[Any]] = normalized_query.get("filters")
 
-    operation = normalized_query[
-        "operation"
-    ]
+    # Check for column existence
+    if column is not None and column not in df.columns:
+        raise ValueError(f"Column '{column}' does not exist in the DataFrame.")
 
-    column = normalized_query.get(
-        "column"
-    )
-
-    group_by = normalized_query.get(
-        "group_by"
-    )
-
-    n = normalized_query.get(
-        "n"
-    )
-
-    filters = normalized_query.get(
-        "filters"
-    )
+    if group_by is not None and group_by not in df.columns:
+        raise ValueError(f"Column '{group_by}' does not exist in the DataFrame.")
 
     # --------------------------------------------------------
-    # VALIDATE COLUMNS
+    # UNFILTERED OPERATIONS
     # --------------------------------------------------------
-
-    if (
-        column is not None
-        and column not in df.columns
-    ):
-        raise ValueError(
-            f"Column '{column}' "
-            "does not exist in the DataFrame."
-        )
-
-    if (
-        group_by is not None
-        and group_by not in df.columns
-    ):
-        raise ValueError(
-            f"Column '{group_by}' "
-            "does not exist in the DataFrame."
-        )
-
-    # --------------------------------------------------------
-    # NO FILTERS
-    # --------------------------------------------------------
-
     if not filters:
-
         if operation == "sum":
-            return calculate_sum(
-                df,
-                column, # pyright: ignore[reportArgumentType]
-            )
-
+            return calculate_sum(df, cast(str, column))
         if operation == "average":
-            return calculate_average(
-                df,
-                column, # pyright: ignore[reportArgumentType]
-            )
-
+            return calculate_average(df, cast(str, column))
         if operation == "count":
-            return (
-                calculate_count(df)
-                if column is None
-                else calculate_count(
-                    df,
-                    column,
-                )
-            )
-        elif operation == "group_average":
-            return group_and_average(
-                df,
-                group_by, # pyright: ignore[reportArgumentType]
-                column, # pyright: ignore[reportArgumentType]
-            )
-
-        elif operation == "group_count":
-            return group_and_count(
-                df,
-                group_by, # pyright: ignore[reportArgumentType]
-            )
-
-        elif operation == "group_sum":
-            return group_and_sum(
-                df,
-                group_by, # pyright: ignore[reportArgumentType]
-                column, # pyright: ignore[reportArgumentType]
-            )
-
-        elif operation == "max":
-            return calculate_max(
-                df,
-                column, # pyright: ignore[reportArgumentType]
-            )
-
-        elif operation == "min":
-            return calculate_min(
-                df,
-                column, # pyright: ignore[reportArgumentType]
-            )
-
-        elif operation == "top_n":
-            return top_n(
-                df,
-                group_by, # pyright: ignore[reportArgumentType]
-                column, # pyright: ignore[reportArgumentType]
-                n, # pyright: ignore[reportArgumentType]
-            )
-
-        elif operation == "unique_count":
-            return calculate_unique_count(
-                df,
-                column, # pyright: ignore[reportArgumentType]
-            )
-
-        elif operation == "value_counts":
-            return value_counts(
-                df,
-                column, # pyright: ignore[reportArgumentType]
-            )
+            return calculate_count(df) if column is None else calculate_count(df, column)
+        if operation == "unique_count":
+            return calculate_unique_count(df, cast(str, column))
+        if operation == "min":
+            return calculate_min(df, cast(str, column))
+        if operation == "max":
+            return calculate_max(df, cast(str, column))
+        if operation == "group_sum":
+            return group_and_sum(df, cast(str, group_by), cast(str, column))
+        if operation == "group_average":
+            return group_and_average(df, cast(str, group_by), cast(str, column))
+        if operation == "group_count":
+            return group_and_count(df, cast(str, group_by))
+        if operation == "value_counts":
+            return value_counts(df, cast(str, column))
+        if operation == "top_n":
+            return top_n(df, cast(str, group_by), cast(str, column), cast(int, n))
 
     # --------------------------------------------------------
     # FILTERED OPERATIONS
     # --------------------------------------------------------
-
-    normalized_filters = normalize_filters(
-        filters, # pyright: ignore[reportArgumentType]
-        df, # pyright: ignore[reportArgumentType]
-    )
-
+    normalized_filters = normalize_filters(filters, df) # pyright: ignore[reportArgumentType]
     if not normalized_filters:
-        raise ValueError(
-            "No valid filters were provided."
-        )
+        raise ValueError("No valid filters were provided.")
 
     if operation == "sum":
-        return filtered_sum(
-            df,
-            normalized_filters,
-            column, # pyright: ignore[reportArgumentType]
-        )
-
+        return filtered_sum(df, normalized_filters, cast(str, column))
     if operation == "average":
-        return filtered_average(
-            df,
-            normalized_filters,
-            column, # pyright: ignore[reportArgumentType]
-        )
-
+        return filtered_average(df, normalized_filters, cast(str, column))
     if operation == "count":
-        return filtered_count(
-            df,
-            normalized_filters,
-        )
-
+        return filtered_count(df, normalized_filters)
     if operation == "unique_count":
-        return filtered_unique_count(
-            df,
-            normalized_filters,
-            column, # pyright: ignore[reportArgumentType]
-        )
-
+        return filtered_unique_count(df, normalized_filters, cast(str, column))
     if operation == "min":
-        return filtered_min(
-            df,
-            normalized_filters,
-            column, # pyright: ignore[reportArgumentType]
-        )
-
+        return filtered_min(df, normalized_filters, cast(str, column))
     if operation == "max":
-        return filtered_max(
-            df,
-            normalized_filters,
-            column, # pyright: ignore[reportArgumentType]
-        )
-
+        return filtered_max(df, normalized_filters, cast(str, column))
     if operation == "group_sum":
-        return filtered_group_and_sum(
-            df,
-            normalized_filters,
-            group_by, # pyright: ignore[reportArgumentType]
-            column, # pyright: ignore[reportArgumentType]
-        )
-
+        return filtered_group_and_sum(df, normalized_filters, cast(str, group_by), cast(str, column))
     if operation == "group_average":
-        return filtered_group_and_average(
-            df,
-            normalized_filters,
-            group_by, # pyright: ignore[reportArgumentType]
-            column, # pyright: ignore[reportArgumentType]
-        )
-
+        return filtered_group_and_average(df, normalized_filters, cast(str, group_by), cast(str, column))
     if operation == "value_counts":
-        return filtered_value_counts(
-            df,
-            normalized_filters,
-            column, # pyright: ignore[reportArgumentType]
-        )
-
+        return filtered_value_counts(df, normalized_filters, cast(str, column))
     if operation == "top_n":
-        return filtered_top_n(
-            df,
-            normalized_filters,
-            group_by, # pyright: ignore[reportArgumentType]
-            column, # pyright: ignore[reportArgumentType]
-            n, # pyright: ignore[reportArgumentType]
-        )
+        return filtered_top_n(df, normalized_filters, cast(str, group_by), cast(str, column), cast(int, n))
 
-    # This should never be reached because
-    # validate_query() validates the operation.
-    raise ValueError(
-        f"Unsupported query operation "
-        f"'{operation}'."
-    )
-
+    raise ValueError(f"Unsupported query operation '{operation}'.")
