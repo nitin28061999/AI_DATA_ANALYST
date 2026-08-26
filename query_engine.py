@@ -1,450 +1,520 @@
-﻿from typing import Any, Dict
+﻿from __future__ import annotations
+
+from typing import Any, Dict
 
 import pandas as pd
 
 import analysis_tools as tools
 
 
-def validate_query(
-    plan: Dict[str, Any],
-) -> Dict[str, Any]:
-    """Validate query plan dictionary and raise ValueError if invalid."""
+# ============================================================
+# QUERY-PLAN VALIDATION
+# ============================================================
 
-    # ========================================================
-    # BASIC VALIDATION
-    # ========================================================
+COLUMN_OPS = {
+    "calculate_sum",
+    "sum",
+    "calculate_average",
+    "average",
+    "mean",
+    "calculate_min",
+    "min",
+    "calculate_max",
+    "max",
+    "calculate_unique_count",
+    "unique_count",
+    "value_counts",
+    "filtered_value_counts",
+}
 
+GROUP_OPS = {
+    "group_and_sum",
+    "group_sum",
+    "filtered_group_sum",
+    "group_and_average",
+    "group_average",
+    "filtered_group_average",
+    "group_and_count",
+    "group_count",
+    "top_n",
+    "filtered_top_n",
+    "percentage_of_total",
+    "filtered_percentage_of_total",
+}
+
+GROUP_VALUE_OPS = {
+    "group_and_sum",
+    "group_sum",
+    "filtered_group_sum",
+    "group_and_average",
+    "group_average",
+    "filtered_group_average",
+    "top_n",
+    "filtered_top_n",
+    "percentage_of_total",
+    "filtered_percentage_of_total",
+}
+
+MONTHLY_VALUE_OPS = {
+    "monthly_sum",
+    "filtered_monthly_sum",
+    "monthly_average",
+    "filtered_monthly_average",
+}
+
+MONTHLY_OPS = MONTHLY_VALUE_OPS | {
+    "monthly_count",
+    "filtered_monthly_count",
+}
+
+VALID_OPERATIONS = COLUMN_OPS | GROUP_OPS | MONTHLY_OPS | {
+    "calculate_count",
+    "count",
+}
+
+
+def _first_present(plan: Dict[str, Any], *keys: str) -> Any:
+    """Return the first non-empty value from a query plan."""
+    for key in keys:
+        value = plan.get(key)
+        if value is not None and value != "":
+            return value
+    return None
+
+
+def validate_query(plan: Dict[str, Any]) -> Dict[str, Any]:
+    """Validate and normalize an analysis query plan."""
     if not isinstance(plan, dict):
-        raise ValueError(
-            "Query must be a dictionary."
-        )
+        raise ValueError("Query must be a dictionary.")
 
     operation = plan.get("operation")
-
     if not operation:
-        raise ValueError(
-            "Query missing 'operation' field."
-        )
+        raise ValueError("Analysis plan missing 'operation' field.")
 
     op = str(operation).strip().lower()
 
-    # ========================================================
-    # SUPPORTED OPERATIONS
-    # ========================================================
+    if op not in VALID_OPERATIONS:
+        raise ValueError(f"Unsupported query operation: '{operation}'")
 
-    col_ops = {
-        "calculate_sum",
-        "sum",
-        "calculate_average",
-        "average",
-        "mean",
-        "calculate_min",
-        "min",
-        "calculate_max",
-        "max",
-        "calculate_unique_count",
-        "unique_count",
-        "value_counts",
-        "filtered_value_counts",
-    }
-
-    group_ops = {
-        "group_and_sum",
-        "group_sum",
-        "filtered_group_sum",
-        "group_and_average",
-        "group_average",
-        "filtered_group_average",
-        "group_and_count",
-        "group_count",
-        "top_n",
-        "filtered_top_n",
-        "percentage_of_total",
-        "filtered_percentage_of_total",
-    }
-
-    other_ops = {
-        "calculate_count",
-        "count",
-        "monthly_sum",
-        "filtered_monthly_sum",
-        "monthly_average",
-        "filtered_monthly_average",
-        "monthly_count",
-        "filtered_monthly_count",
-    }
-
-    valid_ops = col_ops | group_ops | other_ops
-
-    # ========================================================
-    # OPERATION VALIDATION
-    # ========================================================
-
-    if op not in valid_ops:
-        raise ValueError(
-            f"Unsupported query operation: '{operation}'"
-        )
-
-    # ========================================================
-    # COLUMN VALIDATION
-    # ========================================================
-
-    col = (
-        plan.get("column")
-        or plan.get("value_column")
-        or plan.get("count_column")
+    column = _first_present(
+        plan,
+        "column",
+        "value_column",
+        "count_column",
+    )
+    group_column = _first_present(
+        plan,
+        "group_column",
+        "group_by",
     )
 
-    if op in col_ops and not col:
+    if op in COLUMN_OPS and not column:
         raise ValueError(
-            f"Operation '{operation}' is missing 'column'."
+            f"Operation '{operation}' missing 'column'."
         )
 
-    # ========================================================
-    # GROUP VALIDATION
-    # ========================================================
-
-    group_col = (
-        plan.get("group_by")
-        or plan.get("group_column")
-    )
-
-    if op in group_ops and not group_col:
+    if op in GROUP_OPS and not group_column:
         raise ValueError(
-            f"Operation '{operation}' is missing 'group_by'."
+            f"Operation '{operation}' missing 'group_by'."
         )
 
-    # ========================================================
-    # TOP N VALIDATION
-    # ========================================================
-
-    if op in {
-        "top_n",
-        "filtered_top_n",
-    } and "n" not in plan:
+    if op in GROUP_VALUE_OPS and not column:
         raise ValueError(
-            f"Operation '{operation}' is missing 'n'."
+            f"Operation '{operation}' requires 'value_column'."
         )
 
-    # ========================================================
-    # NORMALIZE PLAN
-    # ========================================================
+    if op in MONTHLY_OPS:
+        date_column = _first_present(
+            plan,
+            "date_column",
+            "date",
+        ) or "Date"
+
+        if not date_column:
+            raise ValueError(
+                f"Operation '{operation}' requires 'date_column'."
+            )
+
+        if op in MONTHLY_VALUE_OPS and not column:
+            raise ValueError(
+                f"Operation '{operation}' requires 'value_column'."
+            )
+
+    if op in {"top_n", "filtered_top_n"}:
+        if "n" not in plan:
+            raise ValueError(
+                "Operation 'top_n' missing 'n'."
+            )
+
+    # If filters are supplied, keep their validation delegated to the
+    # analysis-tools filter engine, which owns the canonical filter rules.
+    filters = plan.get("filters", [])
+    if filters is not None and not isinstance(filters, list):
+        raise ValueError("Filters must be a list.")
 
     plan["operation"] = op
-
-    # Preserve both public/internal group names.
-    if group_col:
-        plan["group_by"] = group_col
-        plan["group_column"] = group_col
-
-    # Preserve the canonical column name.
-    if col:
-        plan["column"] = col
-
     return plan
+
+
+# ============================================================
+# MONTHLY HELPERS
+# ============================================================
+
+
+def _prepare_monthly_dataframe(
+    df: pd.DataFrame,
+    date_column: str,
+    value_column: str | None = None,
+    filters: list | None = None,
+) -> pd.DataFrame:
+    """Validate, optionally filter, and prepare data for monthly analysis."""
+    tools.validate_column(df, date_column)
+
+    if value_column is not None:
+        tools.validate_numeric_column(df, value_column)
+
+    working_df = (
+        tools.apply_filters(df, filters)
+        if filters
+        else df.copy()
+    )
+
+    working_df[date_column] = pd.to_datetime(
+        working_df[date_column],
+        errors="coerce",
+    )
+
+    working_df = working_df.dropna(subset=[date_column])
+
+    if working_df.empty:
+        raise ValueError(
+            f"Column '{date_column}' contains no valid dates."
+        )
+
+    working_df["Month"] = (
+        working_df[date_column]
+        .dt.to_period("M")
+        .astype(str)
+    )
+
+    return working_df
+
+
+def _monthly_sum(
+    df: pd.DataFrame,
+    date_column: str,
+    value_column: str,
+    filters: list | None = None,
+) -> pd.DataFrame:
+    """Calculate monthly sums, with optional filters."""
+    working_df = _prepare_monthly_dataframe(
+        df,
+        date_column,
+        value_column,
+        filters,
+    )
+
+    result = (
+        working_df
+        .groupby("Month", as_index=False)[value_column]
+        .sum()
+    )
+
+    return (
+        result
+        .sort_values("Month") # pyright: ignore[reportCallIssue]
+        .reset_index(drop=True)
+    )
+
+
+def _monthly_average(
+    df: pd.DataFrame,
+    date_column: str,
+    value_column: str,
+    filters: list | None = None,
+) -> pd.DataFrame:
+    """Calculate monthly averages, with optional filters."""
+    working_df = _prepare_monthly_dataframe(
+        df,
+        date_column,
+        value_column,
+        filters,
+    )
+
+    result = (
+        working_df
+        .groupby("Month", as_index=False)[value_column]
+        .mean()
+    )
+
+    return (
+        result
+        .sort_values("Month") # pyright: ignore[reportCallIssue]
+        .reset_index(drop=True)
+    )
+
+
+def _monthly_count(
+    df: pd.DataFrame,
+    date_column: str,
+    filters: list | None = None,
+) -> pd.DataFrame:
+    """Count rows per month, with optional filters."""
+    working_df = _prepare_monthly_dataframe(
+        df,
+        date_column,
+        filters=filters,
+    )
+
+    result = (
+        working_df
+        .groupby("Month")
+        .size()
+        .reset_index(name="Count")
+    )
+
+    return (
+        result
+        .sort_values("Month")
+        .reset_index(drop=True)
+    )
+
+
+def _filtered_group_count(
+    df: pd.DataFrame,
+    filters: list,
+    group_column: str,
+) -> pd.DataFrame:
+    """Group-count rows after applying filters."""
+    filtered_df = tools.apply_filters(df, filters)
+
+    if filtered_df.empty:
+        raise ValueError("No rows matched the specified filters.")
+
+    return tools.group_and_count(
+        filtered_df,
+        group_column,
+    )
+
+
+def _filtered_percentage_of_total(
+    df: pd.DataFrame,
+    filters: list,
+    group_column: str,
+    value_column: str,
+) -> pd.DataFrame:
+    """Calculate group percentages after applying filters."""
+    filtered_df = tools.apply_filters(df, filters)
+
+    if filtered_df.empty:
+        raise ValueError("No rows matched the specified filters.")
+
+    return tools.percentage_of_total(
+        filtered_df,
+        group_column,
+        value_column,
+    )
+
+
+# ============================================================
+# QUERY EXECUTION
+# ============================================================
 
 
 def execute_query(
     df: pd.DataFrame,
     plan: Dict[str, Any],
-) -> Any:
-    # sourcery skip: low-code-quality
-    """Execute an analysis plan against a pandas DataFrame."""
-
+) -> Any:  # sourcery skip: low-code-quality
+    """Execute a validated analysis plan against a pandas DataFrame."""
     validated_plan = validate_query(plan)
-
     operation = validated_plan["operation"]
 
-    col = (
-        validated_plan.get("column")
-        or validated_plan.get("value_column")
-        or validated_plan.get("count_column")
+    column = _first_present(
+        validated_plan,
+        "column",
+        "value_column",
+        "count_column",
     )
-
-    group_col = (
-        validated_plan.get("group_by")
-        or validated_plan.get("group_column")
+    group_column = _first_present(
+        validated_plan,
+        "group_column",
+        "group_by",
     )
-
-    date_col = (
-        validated_plan.get("date_column")
-        or validated_plan.get("date")
-        or "Date"
-    )
-
-    filters = validated_plan.get(
-        "filters",
-        [],
-    )
-
-    n = validated_plan.get(
-        "n",
-        5,
-    )
-
+    date_column = _first_present(
+        validated_plan,
+        "date_column",
+        "date",
+    ) or "Date"
+    filters = validated_plan.get("filters", [])
+    n = validated_plan.get("n", 5)
     has_filters = bool(filters)
 
-    # ========================================================
-    # BASIC AGGREGATIONS
-    # ========================================================
-
     match operation:
-
+        # ----------------------------------------------------
+        # BASIC AGGREGATIONS
+        # ----------------------------------------------------
         case "calculate_sum" | "sum":
-            if has_filters:
-                return tools.filtered_sum(
-                    df,
-                    filters,
-                    col, # pyright: ignore[reportArgumentType]
-                )
-
-            return tools.calculate_sum(
-                df,
-                col, # pyright: ignore[reportArgumentType]
+            return (
+                tools.filtered_sum(df, filters, column)
+                if has_filters
+                else tools.calculate_sum(df, column)
             )
 
         case "calculate_average" | "average" | "mean":
-            if has_filters:
-                return tools.filtered_average(
-                    df,
-                    filters,
-                    col, # pyright: ignore[reportArgumentType]
-                )
-
-            return tools.calculate_average(
-                df,
-                col, # pyright: ignore[reportArgumentType]
+            return (
+                tools.filtered_average(df, filters, column)
+                if has_filters
+                else tools.calculate_average(df, column)
             )
 
         case "calculate_count" | "count":
-            if has_filters:
-                return tools.filtered_count(
-                    df,
-                    filters,
-                    col,
-                )
-
-            return tools.calculate_count(
-                df,
-                col,
+            return (
+                tools.filtered_count(df, filters, column)
+                if has_filters
+                else tools.calculate_count(df, column)
             )
 
         case "calculate_unique_count" | "unique_count":
-            if has_filters:
-                return tools.filtered_unique_count(
-                    df,
-                    filters,
-                    col, # pyright: ignore[reportArgumentType]
-                )
-
-            return tools.calculate_unique_count(
-                df,
-                col, # pyright: ignore[reportArgumentType]
+            return (
+                tools.filtered_unique_count(df, filters, column)
+                if has_filters
+                else tools.calculate_unique_count(df, column)
             )
 
         case "calculate_min" | "min":
-            if has_filters:
-                return tools.filtered_min(
-                    df,
-                    filters,
-                    col, # pyright: ignore[reportArgumentType]
-                )
-
-            return tools.calculate_min(
-                df,
-                col, # pyright: ignore[reportArgumentType]
+            return (
+                tools.filtered_min(df, filters, column)
+                if has_filters
+                else tools.calculate_min(df, column)
             )
 
         case "calculate_max" | "max":
-            if has_filters:
-                return tools.filtered_max(
-                    df,
-                    filters,
-                    col, # pyright: ignore[reportArgumentType]
-                )
-
-            return tools.calculate_max(
-                df,
-                col, # pyright: ignore[reportArgumentType]
+            return (
+                tools.filtered_max(df, filters, column)
+                if has_filters
+                else tools.calculate_max(df, column)
             )
 
-        # ====================================================
+        # ----------------------------------------------------
         # GROUP OPERATIONS
-        # ====================================================
-
-        case (
-            "group_and_sum"
-            | "group_sum"
-            | "filtered_group_sum"
-        ):
-            if has_filters:
-                return tools.filtered_group_and_sum(
+        # ----------------------------------------------------
+        case "group_and_sum" | "group_sum" | "filtered_group_sum":
+            return (
+                tools.filtered_group_and_sum(
                     df,
                     filters,
-                    group_col, # pyright: ignore[reportArgumentType]
-                    col, # pyright: ignore[reportArgumentType]
+                    group_column,
+                    column,
                 )
-
-            return tools.group_and_sum(
-                df,
-                group_col, # pyright: ignore[reportArgumentType]
-                col, # pyright: ignore[reportArgumentType]
+                if has_filters
+                else tools.group_and_sum(
+                    df,
+                    group_column,
+                    column,
+                )
             )
 
-        case (
-            "group_and_average"
-            | "group_average"
-            | "filtered_group_average"
-        ):
-            if has_filters:
-                return tools.filtered_group_and_average(
+        case "group_and_average" | "group_average" | "filtered_group_average":
+            return (
+                tools.filtered_group_and_average(
                     df,
                     filters,
-                    group_col, # pyright: ignore[reportArgumentType]
-                    col, # pyright: ignore[reportArgumentType]
+                    group_column,
+                    column,
                 )
-
-            return tools.group_and_average(
-                df,
-                group_col, # pyright: ignore[reportArgumentType]
-                col, # pyright: ignore[reportArgumentType]
+                if has_filters
+                else tools.group_and_average(
+                    df,
+                    group_column,
+                    column,
+                )
             )
 
         case "group_and_count" | "group_count":
-            if has_filters:
-                filtered_df = tools.apply_filters(
+            return (
+                _filtered_group_count(
                     df,
                     filters,
+                    group_column,
                 )
-
-                return tools.group_and_count(
-                    filtered_df,
-                    group_col, # pyright: ignore[reportArgumentType]
+                if has_filters
+                else tools.group_and_count(
+                    df,
+                    group_column,
                 )
-
-            return tools.group_and_count(
-                df,
-                group_col, # pyright: ignore[reportArgumentType]
             )
-
-        # ====================================================
-        # VALUE COUNTS
-        # ====================================================
 
         case "value_counts" | "filtered_value_counts":
-            if has_filters:
-                return tools.filtered_value_counts(
-                    df,
-                    filters,
-                    col, # pyright: ignore[reportArgumentType]
-                )
-
-            return tools.value_counts(
-                df,
-                col, # pyright: ignore[reportArgumentType]
+            return (
+                tools.filtered_value_counts(df, filters, column)
+                if has_filters
+                else tools.value_counts(df, column)
             )
-
-        # ====================================================
-        # TOP N
-        # ====================================================
 
         case "top_n" | "filtered_top_n":
-            if has_filters:
-                return tools.filtered_top_n(
+            return (
+                tools.filtered_top_n(
                     df,
                     filters,
-                    group_col, # pyright: ignore[reportArgumentType]
-                    col, # pyright: ignore[reportArgumentType]
+                    group_column,
+                    column,
                     n,
                 )
-
-            return tools.top_n(
-                df,
-                group_col, # pyright: ignore[reportArgumentType]
-                col, # pyright: ignore[reportArgumentType]
-                n,
+                if has_filters
+                else tools.top_n(
+                    df,
+                    group_column,
+                    column,
+                    n,
+                )
             )
 
-        # ====================================================
-        # PERCENTAGE OF TOTAL
-        # ====================================================
-
-        case (
-            "percentage_of_total"
-            | "filtered_percentage_of_total"
-        ):
-            if has_filters:
-                return tools.filtered_percentage_of_total( # pyright: ignore[reportAttributeAccessIssue]
+        case "percentage_of_total" | "filtered_percentage_of_total":
+            return (
+                _filtered_percentage_of_total(
                     df,
                     filters,
-                    group_col,
-                    col,
+                    group_column,
+                    column,
                 )
-
-            return tools.percentage_of_total(
-                df,
-                group_col, # pyright: ignore[reportArgumentType]
-                col, # pyright: ignore[reportArgumentType]
+                if has_filters
+                else tools.percentage_of_total(
+                    df,
+                    group_column,
+                    column,
+                )
             )
 
-        # ====================================================
-        # MONTHLY ANALYSIS
-        # ====================================================
-
+        # ----------------------------------------------------
+        # MONTHLY OPERATIONS
+        # ----------------------------------------------------
         case "monthly_sum" | "filtered_monthly_sum":
-            if has_filters:
-                return tools.filtered_monthly_sum( # pyright: ignore[reportAttributeAccessIssue]
-                    df,
-                    filters,
-                    date_col,
-                    col,
-                )
-
-            return tools.monthly_sum(
+            return _monthly_sum(
                 df,
-                date_col,
-                col, # type: ignore
+                date_column,
+                column,
+                filters if has_filters else None,
             )
 
-        case (
-            "monthly_average"
-            | "filtered_monthly_average"
-        ):
-            if has_filters:
-                return tools.filtered_monthly_average( # pyright: ignore[reportAttributeAccessIssue]
-                    df,
-                    filters,
-                    date_col,
-                    col,
-                )
-
-            return tools.monthly_average( # pyright: ignore[reportAttributeAccessIssue]
+        case "monthly_average" | "filtered_monthly_average":
+            return _monthly_average(
                 df,
-                date_col,
-                col,
+                date_column,
+                column,
+                filters if has_filters else None,
             )
 
-        case (
-            "monthly_count"
-            | "filtered_monthly_count"
-        ):
-            if has_filters:
-                return tools.filtered_monthly_count( # pyright: ignore[reportAttributeAccessIssue]
-                    df,
-                    filters,
-                    date_col,
-                )
-
-            return tools.monthly_count( # pyright: ignore[reportAttributeAccessIssue]
+        case "monthly_count" | "filtered_monthly_count":
+            return _monthly_count(
                 df,
-                date_col,
+                date_column,
+                filters if has_filters else None,
             )
-
-        # ====================================================
-        # SAFETY FALLBACK
-        # ====================================================
 
         case _:
+            # validate_query() makes this unreachable, but retaining the
+            # explicit guard keeps execute_query safe if the operation set
+            # changes in the future.
             raise ValueError(
                 f"Unsupported query operation: '{operation}'"
             )
