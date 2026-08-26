@@ -440,7 +440,7 @@ def test_create_profile_requires_dataframe():
         create_profile(
             [
                 {"Sales": 100}
-            ]
+            ] # pyright: ignore[reportArgumentType]
         )
 
 
