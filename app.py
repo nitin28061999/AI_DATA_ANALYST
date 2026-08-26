@@ -1,4 +1,5 @@
 import pandas as pd
+import plotly.express as px
 import streamlit as st
 
 from analyst import analyze_data # pyright: ignore[reportAttributeAccessIssue]
@@ -19,9 +20,9 @@ uploaded_file = st.sidebar.file_uploader("Upload CSV Dataset", type=["csv"])
 if uploaded_file is not None:
     try:
         df = pd.read_csv(uploaded_file)
-        st.sidebar.success(f"Loaded dataset with {len(df)} rows and {len(df.columns)} columns.")
+        st.sidebar.success(f"Loaded dataset: {len(df)} rows, {len(df.columns)} columns.")
 
-        # Tabs for interface navigation
+        # Interface Navigation Tabs
         tab_analysis, tab_profile, tab_preview = st.tabs(["💬 Ask AI Analyst", "📈 Data Profile", "📋 Raw Data"])
 
         with tab_preview:
@@ -35,7 +36,7 @@ if uploaded_file is not None:
 
         with tab_analysis:
             st.subheader("Query Your Data")
-            question = st.text_input("Enter your question:", placeholder="e.g., What is the total revenue for Delhi?")
+            question = st.text_input("Enter your question:", placeholder="e.g., Show top 5 products by revenue")
 
             if st.button("Run Analysis", type="primary"):
                 if not question.strip():
@@ -48,11 +49,28 @@ if uploaded_file is not None:
                             st.markdown("### Answer")
                             st.write(output["explanation"])
 
-                            with st.expander("Show Execution Details & Execution Plan"):
-                                st.markdown("**Generated Plan:**")
+                            # Render Chart if result is tabular data
+                            result = output.get("result")
+                            if isinstance(result, pd.DataFrame) and not result.empty:
+                                st.markdown("### Visualization")
+                                cols = result.columns.tolist()
+                                
+                                if len(cols) >= 2:
+                                    x_col, y_col = cols[0], cols[1]
+                                    
+                                    # Choose chart type based on column semantics
+                                    if x_col.lower() in ["month", "date"]:
+                                        fig = px.line(result, x=x_col, y=y_col, title=f"{y_col} over {x_col}", markers=True)
+                                    else:
+                                        fig = px.bar(result, x=x_col, y=y_col, title=f"{y_col} by {x_col}", text_auto=True)
+                                        
+                                    st.plotly_chart(fig, use_container_width=True)
+
+                            with st.expander("Show Execution Details & Plan"):
+                                st.markdown("**Generated Execution Plan:**")
                                 st.json(output["plan"])
-                                st.markdown("**Raw Execution Result:**")
-                                st.write(output["result"])
+                                st.markdown("**Raw Query Output:**")
+                                st.write(result)
 
                         except Exception as e:
                             st.error(f"Analysis Error: {str(e)}")
@@ -60,4 +78,4 @@ if uploaded_file is not None:
     except Exception as e:
         st.error(f"Error loading CSV file: {str(e)}")
 else:
-    st.info("Please upload a CSV file to get started.")
+    st.info("Please upload a CSV file to start analyzing.")

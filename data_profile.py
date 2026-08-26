@@ -1,66 +1,83 @@
-from typing import Any, Dict, List
+from typing import Any, Dict
 import pandas as pd
-import numpy as np
 
-def validate_dataframe(df: pd.DataFrame) -> None:
-    """
-    Validate that the input is a valid, non-empty pandas DataFrame.
-    """
-    if not isinstance(df, pd.DataFrame):
-        raise TypeError("Input must be a pandas DataFrame.")
-    if df.empty:
-        raise ValueError("DataFrame is empty.")
 
-def profile_data(df: pd.DataFrame) -> Dict[str, Any]:
-    """
-    Generate comprehensive profiling metadata for a pandas DataFrame.
-    
-    Returns structured stats on dimensions, memory usage, missing values,
-    data types, numeric summaries, and sample distinct values.
-    """
-    validate_dataframe(df)
+def _is_id_like(col_name: str, series: pd.Series) -> bool:
+    """Check if a column is likely an identifier column."""
+    name_lower = col_name.lower()
+    if any(keyword in name_lower for keyword in ["id", "code", "key", "number"]):
+        return True
+    return series.nunique() == len(series) and not pd.api.types.is_float_dtype(
+        series
+    )
 
-    total_rows, total_cols = df.shape
-    columns_info: Dict[str, Dict[str, Any]] = {}
 
-    for column in df.columns:
-        col_data = df[column]
-        dtype_str = str(col_data.dtype)
-        null_count = int(col_data.isnull().sum())
-        null_percentage = round((null_count / total_rows) * 100, 2)
-        unique_count = int(col_data.nunique(dropna=True))
+def _get_sample_values(series: pd.Series, max_samples: int = 5) -> list:
+    """Extract up to max_samples non-null unique values from a series."""
+    return series.dropna().unique()[:max_samples].tolist()
 
-        info: Dict[str, Any] = {
-            "dtype": dtype_str,
-            "null_count": null_count,
-            "null_percentage": null_percentage,
-            "unique_count": unique_count,
-        }
 
-        # Numeric column summaries
-        if pd.api.types.is_numeric_dtype(col_data) and not pd.api.types.is_bool_dtype(col_data):
-            non_null = col_data.dropna()
-            if not non_null.empty:
-                info.update({
-                    "min": float(non_null.min()) if not np.isinf(non_null.min()) else None,
-                    "max": float(non_null.max()) if not np.isinf(non_null.max()) else None,
-                    "mean": round(float(non_null.mean()), 4),
-                    "std": round(float(non_null.std()), 4) if len(non_null) > 1 else 0.0,
-                    "median": float(non_null.median()),
-                })
-
-        # Categorical / String column sample values
-        elif pd.api.types.is_string_dtype(col_data) or pd.api.types.is_object_dtype(col_data):
-            distinct_samples: List[Any] = col_data.dropna().unique()[:5].tolist()
-            info["sample_values"] = distinct_samples
-
-        columns_info[str(column)] = info
+def _numeric_summary(series: pd.Series) -> Dict[str, Any]:
+    """Generate statistical summary dictionary for numeric series."""
+    clean_series = series.dropna()
+    if clean_series.empty:
+        return {"min": None, "max": None, "mean": None, "median": None, "std": None}
 
     return {
-        "summary": {
-            "total_rows": total_rows,
-            "total_columns": total_cols,
-            "memory_usage_bytes": int(df.memory_usage(deep=True).sum()),
-        },
-        "columns": columns_info,
+        "min": float(clean_series.min()),
+        "max": float(clean_series.max()),
+        "mean": float(clean_series.mean()),
+        "median": float(clean_series.median()),
+        "std": float(clean_series.std()) if len(clean_series) > 1 else 0.0,
     }
+
+
+def _classify_column(series: pd.Series) -> str:
+    """Classify a pandas Series into data categories."""
+    if pd.api.types.is_numeric_dtype(series):
+        return "numeric"
+    elif pd.api.types.is_datetime64_any_dtype(series):
+        return "datetime"
+    elif pd.api.types.is_categorical_dtype(series) or series.nunique() < (len(series) * 0.2): # pyright: ignore[reportAttributeAccessIssue]
+        return "categorical"
+    return "text"
+
+
+def profile_column(series: pd.Series, col_name: str = "") -> Dict[str, Any]:
+    """Profile an individual pandas Series column."""
+    col_type = _classify_column(series)
+    col_info: Dict[str, Any] = {
+        "type": col_type,
+        "dtype": str(series.dtype),
+        "missing_count": int(series.isnull().sum()),
+        "unique_count": int(series.nunique()),
+        "is_id_like": _is_id_like(col_name, series),
+    }
+
+    if col_type == "numeric":
+        col_info.update(_numeric_summary(series))
+    elif col_type == "categorical":
+        col_info["sample_values"] = _get_sample_values(series)
+
+    return col_info
+
+
+def profile_data(df: pd.DataFrame) -> Dict[str, Any]:
+    """Generate comprehensive dataset metadata and column profile summary."""
+    if not isinstance(df, pd.DataFrame) or df.empty:
+        raise ValueError("Input must be a non-empty pandas DataFrame.")
+
+    columns_summary = {
+        col: profile_column(df[col], col_name=col) for col in df.columns
+    }
+    return {
+        "row_count": len(df),
+        "column_count": len(df.columns),
+        "columns": columns_summary,
+    }
+
+
+# Exported function aliases for test suite compatibility
+create_profile = profile_data
+get_profile = profile_data
+_profile_column = profile_column
