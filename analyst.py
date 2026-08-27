@@ -2744,11 +2744,286 @@ RULES:
     return extract_json(
         response_text
     )
+# ============================================================
+# AGENT PLAN NORMALIZATION
+# ============================================================
 
+AGENT_OPERATION_ALIASES = {
+    # Basic operations
+    "sum": "calculate_sum",
+    "average": "calculate_average",
+    "avg": "calculate_average",
+    "mean": "calculate_average",
+    "count": "calculate_count",
+    "unique_count": "calculate_unique_count",
+    "min": "calculate_min",
+    "max": "calculate_max",
+
+    # Group operations
+    "group_sum": "group_and_sum",
+    "group_average": "group_and_average",
+    "group_count": "group_and_count",
+
+    # Other operations
+    "top_n": "top_n",
+    "percentage": "percentage_of_total",
+    "percentage_of_total": "percentage_of_total",
+    "value_count": "value_counts",
+    "value_counts": "value_counts",
+
+    # Filtered operations
+    "filtered_sum": "filtered_sum",
+    "filtered_average": "filtered_average",
+    "filtered_count": "filtered_count",
+    "filtered_unique_count": "filtered_unique_count",
+    "filtered_min": "filtered_min",
+    "filtered_max": "filtered_max",
+    "filtered_group_sum": "filtered_group_and_sum",
+    "filtered_group_average": "filtered_group_and_average",
+    "filtered_value_counts": "filtered_value_counts",
+    "filtered_top_n": "filtered_top_n",
+
+    # Monthly operations
+    "monthly_sum": "monthly_sum",
+    "filtered_monthly_sum": "filtered_monthly_sum",
+    "monthly_average": "monthly_average",
+    "filtered_monthly_average": "filtered_monthly_average",
+    "monthly_count": "monthly_count",
+    "filtered_monthly_count": "filtered_monthly_count",
+}
+
+
+def normalize_agent_plan(
+    df: pd.DataFrame,
+    plan: Dict[str, Any],
+) -> Dict[str, Any]:
+    """
+    Normalize an AI/Gemini-generated analysis plan at the
+    agent boundary.
+
+    The DataFrame remains the source of truth.
+
+    Responsibilities:
+        1. Ensure the model returned a dictionary.
+        2. Normalize operation aliases.
+        3. Normalize legacy field names.
+        4. Normalize filters against the real DataFrame.
+        5. Normalize top-N n.
+        6. Pass the canonical plan to validate_plan().
+    """
+
+    validate_dataframe(df)
+
+    if not isinstance(plan, dict):
+        raise ValueError(
+            "Analysis plan must be a dictionary."
+        )
+
+    result = dict(plan)
+
+    # --------------------------------------------------------
+    # OPERATION
+    # --------------------------------------------------------
+
+    raw_operation = result.get("operation")
+
+    if not raw_operation:
+        raise ValueError(
+            "Analysis plan missing 'operation' field."
+        )
+
+    operation = str(
+        raw_operation
+    ).strip().lower()
+
+    operation = AGENT_OPERATION_ALIASES.get(
+        operation,
+        operation,
+    )
+
+    result["operation"] = operation
+
+    # --------------------------------------------------------
+    # FIELD ALIASES
+    # --------------------------------------------------------
+
+    # group_by -> group_column
+    if (
+        not result.get("group_column")
+        and result.get("group_by")
+    ):
+        result["group_column"] = result["group_by"]
+
+    # date -> date_column
+    if (
+        not result.get("date_column")
+        and result.get("date")
+    ):
+        result["date_column"] = result["date"]
+
+    # --------------------------------------------------------
+    # COLUMN NORMALIZATION
+    # --------------------------------------------------------
+
+    column = result.get("column")
+    value_column = result.get("value_column")
+    count_column = result.get("count_column")
+
+    # For value-based operations, "column" is the canonical
+    # simple-column field.
+    if (
+        not column
+        and value_column
+        and operation in {
+            "calculate_sum",
+            "calculate_average",
+            "calculate_unique_count",
+            "calculate_min",
+            "calculate_max",
+            "value_counts",
+        }
+    ):
+        result["column"] = value_column
+
+    # For count operations, allow count_column or column.
+    if (
+        operation == "calculate_count"
+        and not result.get("column")
+        and count_column
+    ):
+        result["column"] = count_column
+
+    # Filtered simple value operations use value_column.
+    if (
+        operation in {
+            "filtered_sum",
+            "filtered_average",
+            "filtered_unique_count",
+            "filtered_min",
+            "filtered_max",
+        }
+        and not result.get("value_column")
+        and column
+    ):
+        result["value_column"] = column
+
+    # Filtered count uses count_column.
+    if (
+        operation == "filtered_count"
+        and not result.get("count_column")
+        and column
+    ):
+        result["count_column"] = column
+
+    # Group operations may arrive with "column" instead of
+    # "value_column".
+    if (
+        operation in {
+            "group_and_sum",
+            "group_and_average",
+            "top_n",
+            "percentage_of_total",
+            "filtered_group_and_sum",
+            "filtered_group_and_average",
+            "filtered_top_n",
+        }
+        and not result.get("value_column")
+        and column
+    ):
+        result["value_column"] = column
+
+    # --------------------------------------------------------
+    # DATE DEFAULT
+    # --------------------------------------------------------
+
+    monthly_operations = {
+        "monthly_sum",
+        "filtered_monthly_sum",
+        "monthly_average",
+        "filtered_monthly_average",
+        "monthly_count",
+        "filtered_monthly_count",
+    }
+
+    if operation in monthly_operations:
+        if not result.get("date_column"):
+            result["date_column"] = "Date"
+
+    # --------------------------------------------------------
+    # FILTER NORMALIZATION
+    # --------------------------------------------------------
+
+    filtered_operations = {
+        "filtered_sum",
+        "filtered_average",
+        "filtered_count",
+        "filtered_unique_count",
+        "filtered_min",
+        "filtered_max",
+        "filtered_group_and_sum",
+        "filtered_group_and_average",
+        "filtered_value_counts",
+        "filtered_top_n",
+        "filtered_monthly_sum",
+        "filtered_monthly_average",
+        "filtered_monthly_count",
+    }
+
+    if operation in filtered_operations:
+        raw_filters = result.get("filters")
+
+        if raw_filters is None:
+            raise ValueError(
+                f"{operation} requires 'filters'."
+            )
+
+        result["filters"] = normalize_filters(
+            raw_filters,
+            df=df,
+        )
+
+    # --------------------------------------------------------
+    # TOP N
+    # --------------------------------------------------------
+
+    if operation in {
+        "top_n",
+        "filtered_top_n",
+    }:
+        raw_n = result.get("n", 5)
+
+        try:
+            n = int(raw_n)
+        except (
+            TypeError,
+            ValueError,
+        ) as exc:
+            raise ValueError(
+                "n must be an integer."
+            ) from exc
+
+        if n <= 0:
+            raise ValueError(
+                "n must be greater than zero."
+            )
+
+        result["n"] = n
+
+    # --------------------------------------------------------
+    # FINAL VALIDATION
+    # --------------------------------------------------------
+
+    return validate_plan(
+        result,
+        build_profile(df),
+    )
 
 # ============================================================
 # CHOOSE ANALYSIS
 # ============================================================
+
+
+
 
 def choose_analysis(
     question: str,
@@ -2758,7 +3033,7 @@ def choose_analysis(
     df: Optional[
         pd.DataFrame
     ] = None,
-) -> Dict[str, Any]:
+) -> Dict[str, Any]:  # pyright: ignore[reportReturnType]
     """Create and validate an analysis plan with Gemini.
 
     Gemini is the primary and required planner. Python remains the
@@ -2786,10 +3061,22 @@ def choose_analysis(
             normalized_profile,
         )
 
-        return validate_plan(
+        if not isinstance(plan, dict):
+            raise ValueError(
+                "Gemini returned an invalid analysis plan."
+            )
+
+        normalized_plan = normalize_agent_plan(
+            df,
             plan,
-            normalized_profile,
         )
+
+        if not isinstance(normalized_plan, dict):
+            raise ValueError(
+                "Normalized analysis plan is invalid."
+            )
+
+        return normalized_plan
 
     except Exception as exc:
         raise ValueError(
@@ -2798,8 +3085,12 @@ def choose_analysis(
         ) from exc
 
 
-# ============================================================
-# EXECUTION
+
+
+
+
+    
+
 # ============================================================
 
 def execute_analysis(
