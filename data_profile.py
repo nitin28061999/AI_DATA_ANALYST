@@ -1,4 +1,3 @@
-
 from typing import Any, Dict
 import pandas as pd
 
@@ -137,6 +136,7 @@ def _classify_column(
         converted_dates = pd.to_datetime(
             non_null,
             errors="coerce",
+            format="mixed",
         )
 
         if len(non_null) > 0:
@@ -348,4 +348,3 @@ def profile_data(df: pd.DataFrame) -> Dict[str, Any]:
 create_profile = profile_data
 get_profile = profile_data
 _profile_column = profile_column
-

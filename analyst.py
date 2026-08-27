@@ -134,7 +134,6 @@ class GeminiPlan(BaseModel):
 # ============================================================
 
 from dotenv import load_dotenv
-
 load_dotenv()
 
 MODEL_NAME = os.getenv(
@@ -147,25 +146,29 @@ if not MODEL_NAME:
         "GEMINI_MODEL cannot be empty."
     )
 
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+GEMINI_API_KEY = os.getenv(
+    "GEMINI_API_KEY"
+)
 
+client = None
 
 def get_gemini_client():
-    """Create the Gemini client only when a Gemini call is needed."""
+    """Create the Gemini client only when an AI request is actually made."""
+    global client
+    if client is not None:
+        return client
+    try:
+        from google import genai
+    except ImportError as exc:
+        raise RuntimeError(
+            "Gemini SDK is not installed. Install the package from requirements.txt."
+        ) from exc
     if not GEMINI_API_KEY:
         raise ValueError(
             "GEMINI_API_KEY is missing from the environment or .env file."
         )
-
-    try:
-        from google import genai
-    except ImportError as exc:
-        raise ImportError(
-            "The Gemini SDK is not installed. Install dependencies with "
-            "`pip install -r requirements.txt`."
-        ) from exc
-
-    return genai.Client(api_key=GEMINI_API_KEY)
+    client = genai.Client(api_key=GEMINI_API_KEY)
+    return client
 
 
 # ============================================================
@@ -194,6 +197,7 @@ SUPPORTED_OPERATIONS = {
     "filtered_max",
     "filtered_group_and_sum",
     "filtered_group_and_average",
+    "filtered_group_and_count",
     "filtered_value_counts",
     "filtered_top_n",
 }
@@ -230,6 +234,7 @@ FILTERED_OPS = {
     "filtered_max",
     "filtered_group_and_sum",
     "filtered_group_and_average",
+    "filtered_group_and_count",
     "filtered_value_counts",
     "filtered_top_n",
 }
@@ -1598,89 +1603,56 @@ def normalize_filters(
     filters: Any,
     df: Optional[pd.DataFrame] = None,
 ) -> List[Dict[str, Any]]:
-    """Normalize filter dictionaries with support for both calling conventions.
+    """Validate and normalize filters.
 
-    Preferred:
-        normalize_filters(filters, df)
-
-    Backward-compatible:
-        normalize_filters(df, filters)
-
-    Unknown columns are skipped when a DataFrame is supplied so a single
-    hallucinated filter does not crash plan normalization. Final plan
-    validation still rejects invalid columns at the execution boundary.
+    Supports both historical call styles ``normalize_filters(filters, df)``
+    and ``normalize_filters(df, filters)``. Unknown columns are skipped when
+    a DataFrame is supplied, matching the analysis-tool contract.
     """
-    # Backward-compatible argument order used by older tests/callers.
-    if isinstance(filters, pd.DataFrame) and isinstance(df, list):
+    if isinstance(filters, pd.DataFrame):
         filters, df = df, filters
 
     if not isinstance(filters, list):
         raise ValueError("Filters must be a list.")
-
     if not filters:
         raise ValueError("At least one filter is required.")
 
     aliases = {
-        "==": "=",
-        "eq": "=",
-        "equals": "=",
-        "equal": "=",
-        "ne": "!=",
-        "not equal": "!=",
-        "not_equal": "!=",
-        "gt": ">",
-        "greater than": ">",
-        "greater_than": ">",
-        "gte": ">=",
-        "greater than or equal": ">=",
-        "greater_than_or_equal": ">=",
-        "lt": "<",
-        "less than": "<",
-        "less_than": "<",
-        "lte": "<=",
-        "less than or equal": "<=",
-        "less_than_or_equal": "<=",
+        "==": "=", "===": "=", "eq": "=", "equals": "=", "equal": "=",
+        "ne": "!=", "not equal": "!=", "not_equal": "!=",
+        "gt": ">", "greater than": ">", "greater_than": ">",
+        "gte": ">=", "greater than or equal": ">=", "greater_than_or_equal": ">=",
+        "lt": "<", "less than": "<", "less_than": "<",
+        "lte": "<=", "less than or equal": "<=", "less_than_or_equal": "<=",
     }
+    supported = {"=", "!=", ">", ">=", "<", "<=", "contains", "between"}
 
     result: List[Dict[str, Any]] = []
-
     for index, item in enumerate(filters):
         if not isinstance(item, dict):
             raise ValueError(f"Filter #{index + 1} must be a dictionary.")
-
-        column = item.get("column")
-        if not column:
-            raise ValueError(
-                f"Filter #{index + 1} has an empty or missing 'column'."
-            )
-
+        if "column" not in item:
+            raise ValueError(f"Filter #{index + 1} is missing 'column'.")
         if "value" not in item:
             raise ValueError(f"Filter #{index + 1} is missing 'value'.")
 
+        column = item["column"]
+        if not column:
+            raise ValueError(f"Filter #{index + 1} has an empty column.")
         if df is not None and column not in df.columns:
             continue
 
         raw_op = str(item.get("operator", "=") or "=").strip().lower()
-        if raw_op and set(raw_op) == {"="}:
-            operator = "="
-        else:
-            operator = aliases.get(raw_op, raw_op)
-
-        if operator not in FILTER_OPERATORS:
+        operator = "=" if raw_op and set(raw_op) == {"="} else aliases.get(raw_op, raw_op)
+        if operator not in supported:
             raise ValueError(f"Unsupported filter operator '{operator}'.")
 
         value = item["value"]
-
         if operator == "between":
             if not isinstance(value, (list, tuple)) or len(value) != 2:
-                raise ValueError(
-                    "The 'between' filter requires a list/tuple of exactly two values."
-                )
+                raise ValueError("The 'between' filter requires exactly two values.")
             if df is not None:
-                value = [
-                    _coerce(value[0], df[column]),
-                    _coerce(value[1], df[column]),
-                ]
+                value = [_coerce(value[0], df[column]), _coerce(value[1], df[column])]
             else:
                 value = list(value)
         elif operator == "contains":
@@ -1688,16 +1660,9 @@ def normalize_filters(
         elif df is not None:
             value = _coerce(value, df[column])
 
-        result.append(
-            {
-                "column": column,
-                "operator": operator,
-                "value": value,
-            }
-        )
+        result.append({"column": column, "operator": operator, "value": value})
 
     return result
-
 
 # ============================================================
 # PLAN VALIDATION
@@ -1832,6 +1797,7 @@ def validate_plan_columns(
         if operation in {
             "filtered_group_and_sum",
             "filtered_group_and_average",
+            "filtered_group_and_count",
             "filtered_top_n",
         }:
             require("group_column")
@@ -1956,6 +1922,7 @@ def validate_plan(
                 )
 
     return result
+
 
 def normalize_plan(
     df: pd.DataFrame,
@@ -2744,292 +2711,11 @@ RULES:
     return extract_json(
         response_text
     )
-# ============================================================
-# AGENT PLAN NORMALIZATION
-# ============================================================
 
-AGENT_OPERATION_ALIASES = {
-    # Basic operations
-    "sum": "calculate_sum",
-    "average": "calculate_average",
-    "avg": "calculate_average",
-    "mean": "calculate_average",
-    "count": "calculate_count",
-    "unique_count": "calculate_unique_count",
-    "min": "calculate_min",
-    "max": "calculate_max",
-
-    # Group operations
-    "group_sum": "group_and_sum",
-    "group_average": "group_and_average",
-    "group_count": "group_and_count",
-
-    # Other operations
-    "top_n": "top_n",
-    "percentage": "percentage_of_total",
-    "percentage_of_total": "percentage_of_total",
-    "value_count": "value_counts",
-    "value_counts": "value_counts",
-
-    # Filtered operations
-    "filtered_sum": "filtered_sum",
-    "filtered_average": "filtered_average",
-    "filtered_count": "filtered_count",
-    "filtered_unique_count": "filtered_unique_count",
-    "filtered_min": "filtered_min",
-    "filtered_max": "filtered_max",
-    "filtered_group_sum": "filtered_group_and_sum",
-    "filtered_group_average": "filtered_group_and_average",
-    "filtered_value_counts": "filtered_value_counts",
-    "filtered_top_n": "filtered_top_n",
-
-    # Monthly operations
-    "monthly_sum": "monthly_sum",
-    "filtered_monthly_sum": "filtered_monthly_sum",
-    "monthly_average": "monthly_average",
-    "filtered_monthly_average": "filtered_monthly_average",
-    "monthly_count": "monthly_count",
-    "filtered_monthly_count": "filtered_monthly_count",
-}
-
-
-def normalize_agent_plan(
-    df: pd.DataFrame,
-    plan: Dict[str, Any],
-) -> Dict[str, Any]:
-    """
-    Normalize an AI/Gemini-generated analysis plan at the
-    agent boundary.
-
-    The DataFrame remains the source of truth.
-
-    Responsibilities:
-        1. Ensure the model returned a dictionary.
-        2. Normalize operation aliases.
-        3. Normalize legacy field names.
-        4. Normalize filters against the real DataFrame.
-        5. Normalize top-N n.
-        6. Pass the canonical plan to validate_plan().
-    """
-
-    validate_dataframe(df)
-
-    if not isinstance(plan, dict):
-        raise ValueError(
-            "Analysis plan must be a dictionary."
-        )
-
-    result = dict(plan)
-
-    # --------------------------------------------------------
-    # OPERATION
-    # --------------------------------------------------------
-
-    raw_operation = result.get("operation")
-
-    if not raw_operation:
-        raise ValueError(
-            "Analysis plan missing 'operation' field."
-        )
-
-    operation = str(
-        raw_operation
-    ).strip().lower()
-
-    operation = AGENT_OPERATION_ALIASES.get(
-        operation,
-        operation,
-    )
-
-    result["operation"] = operation
-
-    # --------------------------------------------------------
-    # FIELD ALIASES
-    # --------------------------------------------------------
-
-    # group_by -> group_column
-    if (
-        not result.get("group_column")
-        and result.get("group_by")
-    ):
-        result["group_column"] = result["group_by"]
-
-    # date -> date_column
-    if (
-        not result.get("date_column")
-        and result.get("date")
-    ):
-        result["date_column"] = result["date"]
-    # --------------------------------------------------------
-    # COLUMN NORMALIZATION
-    # --------------------------------------------------------
-
-    column = result.get("column")
-    value_column = result.get("value_column")
-    count_column = result.get("count_column")
-
-    # For value-based operations, "column" is the canonical
-    # simple-column field.
-    if (
-        not column
-        and value_column
-        and operation in {
-            "calculate_sum",
-            "calculate_average",
-            "calculate_unique_count",
-            "calculate_min",
-            "calculate_max",
-            "value_counts",
-        }
-    ):
-        result["column"] = value_column
-
-    # For count operations, allow count_column or column.
-    if (
-        operation == "calculate_count"
-        and not result.get("column")
-        and count_column
-    ):
-        result["column"] = count_column
-
-    # Filtered simple value operations use value_column.
-    if (
-        operation in {
-            "filtered_sum",
-            "filtered_average",
-            "filtered_unique_count",
-            "filtered_min",
-            "filtered_max",
-        }
-        and not result.get("value_column")
-        and column
-    ):
-        result["value_column"] = column
-
-    # Filtered count uses count_column.
-    if (
-        operation == "filtered_count"
-        and not result.get("count_column")
-        and column
-    ):
-        result["count_column"] = column
-
-    # Group operations may arrive with "column" instead of
-    # "value_column".
-    if (
-        operation in {
-            "group_and_sum",
-            "group_and_average",
-            "top_n",
-            "percentage_of_total",
-            "filtered_group_and_sum",
-            "filtered_group_and_average",
-            "filtered_top_n",
-        }
-        and not result.get("value_column")
-        and column
-    ):
-        result["value_column"] = column
-
-    # --------------------------------------------------------
-    # DATE DEFAULT
-    # --------------------------------------------------------
-
-    monthly_operations = {
-        "monthly_sum",
-        "filtered_monthly_sum",
-        "monthly_average",
-        "filtered_monthly_average",
-        "monthly_count",
-        "filtered_monthly_count",
-    }
-
-    if operation in monthly_operations:
-        if not result.get("date_column"):
-            result["date_column"] = "Date"
-
-    # --------------------------------------------------------
-    # FILTER NORMALIZATION
-    # --------------------------------------------------------
-
-    filtered_operations = {
-        "filtered_sum",
-        "filtered_average",
-        "filtered_count",
-        "filtered_unique_count",
-        "filtered_min",
-        "filtered_max",
-        "filtered_group_and_sum",
-        "filtered_group_and_average",
-        "filtered_value_counts",
-        "filtered_top_n",
-        "filtered_monthly_sum",
-        "filtered_monthly_average",
-        "filtered_monthly_count",
-    }
-
-    if operation in filtered_operations:
-        raw_filters = result.get("filters")
-
-        if raw_filters is None:
-            raise ValueError(
-                f"{operation} requires 'filters'."
-            )
-
-        result["filters"] = normalize_filters(
-            raw_filters,
-            df=df,
-        )
-
-    # --------------------------------------------------------
-    # TOP N
-    # --------------------------------------------------------
-
-    if operation in {
-        "top_n",
-        "filtered_top_n",
-    }:
-        raw_n = result.get("n", 5)
-
-        try:
-            n = int(raw_n)
-        except (
-            TypeError,
-            ValueError,
-        ) as exc:
-            raise ValueError(
-                "n must be an integer."
-            ) from exc
-
-        if n <= 0:
-            raise ValueError(
-                "n must be greater than zero."
-            )
-
-        result["n"] = n
-
-    # --------------------------------------------------------
-    # FINAL VALIDATION
-    # --------------------------------------------------------
-
-    validated_plan = validate_plan(
-        result,
-        build_profile(df),
-    )
-
-    if not isinstance(validated_plan, dict):
-        raise ValueError(
-            "Normalized analysis plan is invalid."
-        )
-
-    return validated_plan
 
 # ============================================================
 # CHOOSE ANALYSIS
 # ============================================================
-
-
-
 
 def choose_analysis(
     question: str,
@@ -3039,7 +2725,7 @@ def choose_analysis(
     df: Optional[
         pd.DataFrame
     ] = None,
-) -> Dict[str, Any]:  # pyright: ignore[reportReturnType]
+) -> Dict[str, Any]:
     """Create and validate an analysis plan with Gemini.
 
     Gemini is the primary and required planner. Python remains the
@@ -3067,22 +2753,10 @@ def choose_analysis(
             normalized_profile,
         )
 
-        if not isinstance(plan, dict):
-            raise ValueError(
-                "Gemini returned an invalid analysis plan."
-            )
-
-        normalized_plan = normalize_agent_plan(
-            df,
+        return validate_plan(
             plan,
+            normalized_profile,
         )
-
-        if not isinstance(normalized_plan, dict):
-            raise ValueError(
-                "Normalized analysis plan is invalid."
-            )
-
-        return normalized_plan
 
     except Exception as exc:
         raise ValueError(
@@ -3091,320 +2765,18 @@ def choose_analysis(
         ) from exc
 
 
-
-
-
-
-    
-
 # ============================================================
-
-def execute_analysis(
-    df: pd.DataFrame,
-    plan: Dict[str, Any],
-) -> Any:
-    """
-    Execute a validated analysis plan.
-
-    The execution boundary is intentionally strict:
-
-        raw plan
-            |
-            v
-        normalize_plan()
-            |
-            v
-        validate normalized plan
-            |
-            v
-        Python calculation
-            |
-            v
-        actual result
-
-    Gemini/AI never performs the calculation.
-
-    The DataFrame remains the source of truth for:
-        - valid columns
-        - valid filters
-        - operation requirements
-        - top-N parameters
-    """
-
-    # --------------------------------------------------------
-    # STEP 1
-    # Validate the real DataFrame.
-    # --------------------------------------------------------
-
-    validate_dataframe(df)
-
-    # --------------------------------------------------------
-    # STEP 2
-    # Normalize and validate the incoming plan against
-    # the REAL DataFrame.
-    #
-    # normalize_plan() already:
-    #   - validates the plan structure
-    #   - validates supported operations
-    #   - normalizes filters
-    #   - normalizes top-N n
-    #   - validates referenced columns
-    #
-    # Keeping this as the first execution step ensures that
-    # no calculation function receives an untrusted plan.
-    # --------------------------------------------------------
-
-    normalized_plan = normalize_plan(
-        df,
-        plan,
-    )
-
-    if not isinstance(
-        normalized_plan,
-        dict,
-    ):
-        raise ValueError(
-            "Normalized analysis plan is invalid."
-        )
-
-    # --------------------------------------------------------
-    # STEP 3
-    # Extract the canonical operation.
-    # --------------------------------------------------------
-
-    operation = normalized_plan.get(
-        "operation"
-    )
-
-    if not operation:
-        raise ValueError(
-            "Normalized analysis plan is missing "
-            "'operation'."
-        )
-
-    # --------------------------------------------------------
-    # BASIC OPERATIONS
-    # --------------------------------------------------------
-
-    if operation == "calculate_sum":
-
-        return calculate_sum(
-            df,
-            normalized_plan["column"],
-        )
-
-    if operation == "calculate_average":
-
-        return calculate_average(
-            df,
-            normalized_plan["column"],
-        )
-
-    if operation == "calculate_count":
-
-        return calculate_count(
-            df,
-            normalized_plan["column"],
-        )
-
-    if operation == "calculate_unique_count":
-
-        return calculate_unique_count(
-            df,
-            normalized_plan["column"],
-        )
-
-    if operation == "calculate_min":
-
-        return calculate_min(
-            df,
-            normalized_plan["column"],
-        )
-
-    if operation == "calculate_max":
-
-        return calculate_max(
-            df,
-            normalized_plan["column"],
-        )
-
-    # --------------------------------------------------------
-    # GROUP OPERATIONS
-    # --------------------------------------------------------
-
-    if operation == "group_and_sum":
-
-        return group_and_sum(
-            df,
-            normalized_plan["group_column"],
-            normalized_plan["value_column"],
-        )
-
-    if operation == "group_and_average":
-
-        return group_and_average(
-            df,
-            normalized_plan["group_column"],
-            normalized_plan["value_column"],
-        )
-
-    if operation == "group_and_count":
-
-        return group_and_count(
-            df,
-            normalized_plan["group_column"],
-        )
-
-    # --------------------------------------------------------
-    # TOP N
-    # --------------------------------------------------------
-
-    if operation == "top_n":
-
-        return top_n(
-            df,
-            normalized_plan["group_column"],
-            normalized_plan["value_column"],
-            normalized_plan["n"],
-        )
-
-    # --------------------------------------------------------
-    # PERCENTAGE
-    # --------------------------------------------------------
-
-    if operation == "percentage_of_total":
-
-        return percentage_of_total(
-            df,
-            normalized_plan["group_column"],
-            normalized_plan["value_column"],
-        )
-
-    # --------------------------------------------------------
-    # MONTHLY SUM
-    # --------------------------------------------------------
-
-    if operation == "monthly_sum":
-
-        return monthly_sum(
-            df,
-            normalized_plan["date_column"],
-            normalized_plan["value_column"],
-        )
-
-    # --------------------------------------------------------
-    # VALUE COUNTS
-    # --------------------------------------------------------
-
-    if operation == "value_counts":
-
-        return value_counts(
-            df,
-            normalized_plan["column"],
-        )
-
-    # --------------------------------------------------------
-    # FILTERED SUM
-    # --------------------------------------------------------
-
-    if operation == "filtered_sum":
-
-        return filtered_sum(
-            df,
-            normalized_plan["filters"],
-            normalized_plan["value_column"],
-        )
-
-    # --------------------------------------------------------
-    # FILTERED AVERAGE
-    # --------------------------------------------------------
-
-    if operation == "filtered_average":
-
-        return filtered_average(
-            df,
-            normalized_plan["filters"],
-            normalized_plan["value_column"],
-        )
-
-    # --------------------------------------------------------
-    # FILTERED COUNT
-    # --------------------------------------------------------
-
-    if operation == "filtered_count":
-
-        return filtered_count(
-            df,
-            normalized_plan["filters"],
-            normalized_plan["count_column"],
-        )
-
-    # --------------------------------------------------------
-    # FILTERED UNIQUE COUNT
-    # --------------------------------------------------------
-
-    if operation == "filtered_unique_count":
-
-        return filtered_unique_count(
-            df,
-            normalized_plan["filters"],
-            normalized_plan["value_column"],
-        )
-
-    # --------------------------------------------------------
-    # FILTERED MIN
-    # --------------------------------------------------------
-
-    if operation == "filtered_min":
-
-        return filtered_min(
-            df,
-            normalized_plan["filters"],
-            normalized_plan["value_column"],
-        )
-
-    # --------------------------------------------------------
-    # FILTERED MAX
-    # --------------------------------------------------------
-
-    if operation == "filtered_max":
-
-        return filtered_max(
-            df,
-            normalized_plan["filters"],
-            normalized_plan["value_column"],
-        )
-
-    # --------------------------------------------------------
-    # FILTERED GROUP SUM
-    # --------------------------------------------------------
-
-    if operation == "filtered_group_and_sum":
-
-        return filtered_group_and_sum(
-            df,
-            normalized_plan["filters"],
-            normalized_plan["group_column"],
-            normalized_plan["value_column"],
-        )
-
-    # --------------------------------------------------------
-    # FILTERED GROUP AVERAGE
-    # --------------------------------------------------------
+# FILTERED GROUP COUNT
+# ============================================================
 
 def filtered_group_and_count(
     df: pd.DataFrame,
     filters: list,
     group_column: str,
 ) -> pd.DataFrame:
-    """
-    Group rows and count them after applying filters.
+    """Group and count rows after applying the supplied filters."""
 
-    The filtering is performed first, then the existing
-    group_and_count() implementation is used so that the
-    result has exactly the same grouping/counting semantics
-    as the unfiltered operation.
-    """
+    validate_dataframe(df)
 
     filtered_df = apply_filters(
         df,
@@ -3420,7 +2792,300 @@ def filtered_group_and_count(
         filtered_df,
         group_column,
     )
-```
+
+
+# ============================================================
+# EXECUTION
+# ============================================================
+
+def execute_analysis(
+    df: pd.DataFrame,
+    plan: Dict[str, Any],
+) -> Any:
+    """
+    Execute a validated analysis plan.
+
+    Python performs all actual calculations.
+    """
+
+    validate_dataframe(df)
+
+    plan = normalize_plan(
+        df,
+        plan,
+    )
+
+    operation = plan[
+        "operation"
+    ]
+
+    # --------------------------------------------------------
+    # BASIC OPERATIONS
+    # --------------------------------------------------------
+
+    if operation == "calculate_sum":
+
+        return calculate_sum(
+            df,
+            plan["column"],
+        )
+
+    if operation == "calculate_average":
+
+        return calculate_average(
+            df,
+            plan["column"],
+        )
+
+    if operation == "calculate_count":
+
+        return calculate_count(
+            df,
+            plan["column"],
+        )
+
+    if operation == "calculate_unique_count":
+
+        return calculate_unique_count(
+            df,
+            plan["column"],
+        )
+
+    if operation == "calculate_min":
+
+        return calculate_min(
+            df,
+            plan["column"],
+        )
+
+    if operation == "calculate_max":
+
+        return calculate_max(
+            df,
+            plan["column"],
+        )
+
+    # --------------------------------------------------------
+    # GROUP OPERATIONS
+    # --------------------------------------------------------
+
+    if operation == "group_and_sum":
+
+        return group_and_sum(
+            df,
+            plan["group_column"],
+            plan["value_column"],
+        )
+
+    if operation == "group_and_average":
+
+        return group_and_average(
+            df,
+            plan["group_column"],
+            plan["value_column"],
+        )
+
+    if operation == "group_and_count":
+
+        return group_and_count(
+            df,
+            plan["group_column"],
+        )
+
+    # --------------------------------------------------------
+    # TOP N
+    # --------------------------------------------------------
+
+    if operation == "top_n":
+
+        return top_n(
+            df,
+            plan["group_column"],
+            plan["value_column"],
+            plan.get(
+                "n",
+                5,
+            ),
+        )
+
+    # --------------------------------------------------------
+    # PERCENTAGE
+    # --------------------------------------------------------
+
+    if operation == "percentage_of_total":
+
+        return percentage_of_total(
+            df,
+            plan["group_column"],
+            plan["value_column"],
+        )
+
+    # --------------------------------------------------------
+    # MONTHLY
+    # --------------------------------------------------------
+
+    if operation == "monthly_sum":
+
+        return monthly_sum(
+            df,
+            plan["date_column"],
+            plan["value_column"],
+        )
+
+    # --------------------------------------------------------
+    # VALUE COUNTS
+    # --------------------------------------------------------
+
+    if operation == "value_counts":
+
+        return value_counts(
+            df,
+            plan["column"],
+        )
+
+    # --------------------------------------------------------
+    # FILTERED SUM
+    # --------------------------------------------------------
+
+    if operation == "filtered_sum":
+
+        return filtered_sum(
+            df,
+            plan["filters"],
+            plan["value_column"],
+        )
+
+    # --------------------------------------------------------
+    # FILTERED AVERAGE
+    # --------------------------------------------------------
+
+    if operation == "filtered_average":
+
+        return filtered_average(
+            df,
+            plan["filters"],
+            plan["value_column"],
+        )
+
+    # --------------------------------------------------------
+    # FILTERED COUNT
+    # --------------------------------------------------------
+
+    if operation == "filtered_count":
+
+        return filtered_count(
+            df,
+            plan["filters"],
+            plan["count_column"],
+        )
+
+    # --------------------------------------------------------
+    # FILTERED UNIQUE COUNT
+    # --------------------------------------------------------
+
+    if operation == "filtered_unique_count":
+
+        return filtered_unique_count(
+            df,
+            plan["filters"],
+            plan["value_column"],
+        )
+
+    # --------------------------------------------------------
+    # FILTERED MIN
+    # --------------------------------------------------------
+
+    if operation == "filtered_min":
+
+        return filtered_min(
+            df,
+            plan["filters"],
+            plan["value_column"],
+        )
+
+    # --------------------------------------------------------
+    # FILTERED MAX
+    # --------------------------------------------------------
+
+    if operation == "filtered_max":
+
+        return filtered_max(
+            df,
+            plan["filters"],
+            plan["value_column"],
+        )
+
+    # --------------------------------------------------------
+    # FILTERED GROUP COUNT
+    # --------------------------------------------------------
+
+    if operation == "filtered_group_and_count":
+
+        return filtered_group_and_count(
+            df,
+            plan["filters"],
+            plan["group_column"],
+        )
+
+    # --------------------------------------------------------
+    # FILTERED GROUP SUM
+    # --------------------------------------------------------
+
+    if operation == "filtered_group_and_sum":
+
+        return filtered_group_and_sum(
+            df,
+            plan["filters"],
+            plan["group_column"],
+            plan["value_column"],
+        )
+
+    # --------------------------------------------------------
+    # FILTERED GROUP AVERAGE
+    # --------------------------------------------------------
+
+    if operation == "filtered_group_and_average":
+
+        return filtered_group_and_average(
+            df,
+            plan["filters"],
+            plan["group_column"],
+            plan["value_column"],
+        )
+
+    # --------------------------------------------------------
+    # FILTERED VALUE COUNTS
+    # --------------------------------------------------------
+
+    if operation == "filtered_value_counts":
+
+        return filtered_value_counts(
+            df,
+            plan["filters"],
+            plan["column"],
+        )
+
+    # --------------------------------------------------------
+    # FILTERED TOP N
+    # --------------------------------------------------------
+
+    if operation == "filtered_top_n":
+
+        return filtered_top_n(
+            df,
+            plan["filters"],
+            plan["group_column"],
+            plan["value_column"],
+            plan.get(
+                "n",
+                5,
+            ),
+        )
+
+    raise ValueError(
+        f"Unsupported operation: "
+        f"{operation}"
+    )
 
 
 # ============================================================
