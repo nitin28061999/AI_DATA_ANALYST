@@ -3310,6 +3310,75 @@ def run_analysis(
 
 
 # ============================================================
+# UI-FRIENDLY ENTRY POINT
+# ============================================================
+
+def analyze_data(
+    df: pd.DataFrame,
+    question: str,
+    profile: Optional[
+        Dict[str, Any]
+    ] = None,
+) -> Dict[str, Any]:
+    """
+    Convenience wrapper around run_analysis() for UI layers such as
+    Streamlit's app.py.
+
+    Differences from run_analysis():
+
+    - profile is optional; it is built automatically via
+      data_profile.profile_data() when not supplied.
+    - "result" is returned as the *raw* Python object (e.g. an actual
+      pandas DataFrame) rather than the JSON-serialized form, so callers
+      can render tables/charts directly. A JSON-safe copy is also
+      included under "result_json" for logging/display purposes.
+    """
+
+    validate_dataframe(df)
+
+    if profile is None:
+        from data_profile import profile_data
+
+        profile = profile_data(df)
+
+    normalized_profile = normalize_profile(
+        df,
+        profile,
+    )
+
+    plan = choose_analysis(
+        question,
+        normalized_profile,
+        df=df,
+    )
+
+    plan = normalize_plan(
+        df,
+        plan,
+    )
+
+    result = execute_analysis(
+        df,
+        plan,
+    )
+
+    explanation = explain_result(
+        question,
+        plan,
+        result,
+    )
+
+    return {
+        "plan": plan,
+        "result": result,
+        "result_json": serialize_result(
+            result
+        ),
+        "explanation": explanation,
+    }
+
+
+# ============================================================
 # BACKWARD-COMPATIBILITY ALIAS
 # ============================================================
 
