@@ -12,6 +12,7 @@ import pandas as pd
 from pydantic import BaseModel, Field
 
 from analysis_tools import (
+    apply_filters,
     calculate_sum,
     calculate_average,
     calculate_count,
@@ -3097,6 +3098,7 @@ def choose_analysis(
     
 
 # ============================================================
+
 def execute_analysis(
     df: pd.DataFrame,
     plan: Dict[str, Any],
@@ -3104,19 +3106,81 @@ def execute_analysis(
     """
     Execute a validated analysis plan.
 
-    Python performs all actual calculations.
+    The execution boundary is intentionally strict:
+
+        raw plan
+            |
+            v
+        normalize_plan()
+            |
+            v
+        validate normalized plan
+            |
+            v
+        Python calculation
+            |
+            v
+        actual result
+
+    Gemini/AI never performs the calculation.
+
+    The DataFrame remains the source of truth for:
+        - valid columns
+        - valid filters
+        - operation requirements
+        - top-N parameters
     """
+
+    # --------------------------------------------------------
+    # STEP 1
+    # Validate the real DataFrame.
+    # --------------------------------------------------------
 
     validate_dataframe(df)
 
-    plan = normalize_plan(
+    # --------------------------------------------------------
+    # STEP 2
+    # Normalize and validate the incoming plan against
+    # the REAL DataFrame.
+    #
+    # normalize_plan() already:
+    #   - validates the plan structure
+    #   - validates supported operations
+    #   - normalizes filters
+    #   - normalizes top-N n
+    #   - validates referenced columns
+    #
+    # Keeping this as the first execution step ensures that
+    # no calculation function receives an untrusted plan.
+    # --------------------------------------------------------
+
+    normalized_plan = normalize_plan(
         df,
         plan,
     )
 
-    operation = plan[
+    if not isinstance(
+        normalized_plan,
+        dict,
+    ):
+        raise ValueError(
+            "Normalized analysis plan is invalid."
+        )
+
+    # --------------------------------------------------------
+    # STEP 3
+    # Extract the canonical operation.
+    # --------------------------------------------------------
+
+    operation = normalized_plan.get(
         "operation"
-    ]
+    )
+
+    if not operation:
+        raise ValueError(
+            "Normalized analysis plan is missing "
+            "'operation'."
+        )
 
     # --------------------------------------------------------
     # BASIC OPERATIONS
@@ -3126,42 +3190,42 @@ def execute_analysis(
 
         return calculate_sum(
             df,
-            plan["column"],
+            normalized_plan["column"],
         )
 
     if operation == "calculate_average":
 
         return calculate_average(
             df,
-            plan["column"],
+            normalized_plan["column"],
         )
 
     if operation == "calculate_count":
 
         return calculate_count(
             df,
-            plan["column"],
+            normalized_plan["column"],
         )
 
     if operation == "calculate_unique_count":
 
         return calculate_unique_count(
             df,
-            plan["column"],
+            normalized_plan["column"],
         )
 
     if operation == "calculate_min":
 
         return calculate_min(
             df,
-            plan["column"],
+            normalized_plan["column"],
         )
 
     if operation == "calculate_max":
 
         return calculate_max(
             df,
-            plan["column"],
+            normalized_plan["column"],
         )
 
     # --------------------------------------------------------
@@ -3172,23 +3236,23 @@ def execute_analysis(
 
         return group_and_sum(
             df,
-            plan["group_column"],
-            plan["value_column"],
+            normalized_plan["group_column"],
+            normalized_plan["value_column"],
         )
 
     if operation == "group_and_average":
 
         return group_and_average(
             df,
-            plan["group_column"],
-            plan["value_column"],
+            normalized_plan["group_column"],
+            normalized_plan["value_column"],
         )
 
     if operation == "group_and_count":
 
         return group_and_count(
             df,
-            plan["group_column"],
+            normalized_plan["group_column"],
         )
 
     # --------------------------------------------------------
@@ -3199,12 +3263,9 @@ def execute_analysis(
 
         return top_n(
             df,
-            plan["group_column"],
-            plan["value_column"],
-            plan.get(
-                "n",
-                5,
-            ),
+            normalized_plan["group_column"],
+            normalized_plan["value_column"],
+            normalized_plan["n"],
         )
 
     # --------------------------------------------------------
@@ -3215,20 +3276,20 @@ def execute_analysis(
 
         return percentage_of_total(
             df,
-            plan["group_column"],
-            plan["value_column"],
+            normalized_plan["group_column"],
+            normalized_plan["value_column"],
         )
 
     # --------------------------------------------------------
-    # MONTHLY
+    # MONTHLY SUM
     # --------------------------------------------------------
 
     if operation == "monthly_sum":
 
         return monthly_sum(
             df,
-            plan["date_column"],
-            plan["value_column"],
+            normalized_plan["date_column"],
+            normalized_plan["value_column"],
         )
 
     # --------------------------------------------------------
@@ -3239,7 +3300,7 @@ def execute_analysis(
 
         return value_counts(
             df,
-            plan["column"],
+            normalized_plan["column"],
         )
 
     # --------------------------------------------------------
@@ -3250,8 +3311,8 @@ def execute_analysis(
 
         return filtered_sum(
             df,
-            plan["filters"],
-            plan["value_column"],
+            normalized_plan["filters"],
+            normalized_plan["value_column"],
         )
 
     # --------------------------------------------------------
@@ -3262,8 +3323,8 @@ def execute_analysis(
 
         return filtered_average(
             df,
-            plan["filters"],
-            plan["value_column"],
+            normalized_plan["filters"],
+            normalized_plan["value_column"],
         )
 
     # --------------------------------------------------------
@@ -3274,8 +3335,8 @@ def execute_analysis(
 
         return filtered_count(
             df,
-            plan["filters"],
-            plan["count_column"],
+            normalized_plan["filters"],
+            normalized_plan["count_column"],
         )
 
     # --------------------------------------------------------
@@ -3286,8 +3347,8 @@ def execute_analysis(
 
         return filtered_unique_count(
             df,
-            plan["filters"],
-            plan["value_column"],
+            normalized_plan["filters"],
+            normalized_plan["value_column"],
         )
 
     # --------------------------------------------------------
@@ -3298,8 +3359,8 @@ def execute_analysis(
 
         return filtered_min(
             df,
-            plan["filters"],
-            plan["value_column"],
+            normalized_plan["filters"],
+            normalized_plan["value_column"],
         )
 
     # --------------------------------------------------------
@@ -3310,8 +3371,8 @@ def execute_analysis(
 
         return filtered_max(
             df,
-            plan["filters"],
-            plan["value_column"],
+            normalized_plan["filters"],
+            normalized_plan["value_column"],
         )
 
     # --------------------------------------------------------
@@ -3322,57 +3383,44 @@ def execute_analysis(
 
         return filtered_group_and_sum(
             df,
-            plan["filters"],
-            plan["group_column"],
-            plan["value_column"],
+            normalized_plan["filters"],
+            normalized_plan["group_column"],
+            normalized_plan["value_column"],
         )
 
     # --------------------------------------------------------
     # FILTERED GROUP AVERAGE
     # --------------------------------------------------------
 
-    if operation == "filtered_group_and_average":
+def filtered_group_and_count(
+    df: pd.DataFrame,
+    filters: list,
+    group_column: str,
+) -> pd.DataFrame:
+    """
+    Group rows and count them after applying filters.
 
-        return filtered_group_and_average(
-            df,
-            plan["filters"],
-            plan["group_column"],
-            plan["value_column"],
-        )
+    The filtering is performed first, then the existing
+    group_and_count() implementation is used so that the
+    result has exactly the same grouping/counting semantics
+    as the unfiltered operation.
+    """
 
-    # --------------------------------------------------------
-    # FILTERED VALUE COUNTS
-    # --------------------------------------------------------
-
-    if operation == "filtered_value_counts":
-
-        return filtered_value_counts(
-            df,
-            plan["filters"],
-            plan["column"],
-        )
-
-    # --------------------------------------------------------
-    # FILTERED TOP N
-    # --------------------------------------------------------
-
-    if operation == "filtered_top_n":
-
-        return filtered_top_n(
-            df,
-            plan["filters"],
-            plan["group_column"],
-            plan["value_column"],
-            plan.get(
-                "n",
-                5,
-            ),
-        )
-
-    raise ValueError(
-        f"Unsupported operation: "
-        f"{operation}"
+    filtered_df = apply_filters(
+        df,
+        filters,
     )
+
+    if filtered_df.empty:
+        raise ValueError(
+            "No rows matched the specified filters."
+        )
+
+    return group_and_count(
+        filtered_df,
+        group_column,
+    )
+```
 
 
 # ============================================================
