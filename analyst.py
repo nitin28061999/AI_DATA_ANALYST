@@ -2859,7 +2859,6 @@ def normalize_agent_plan(
         and result.get("date")
     ):
         result["date_column"] = result["date"]
-        return result
     # --------------------------------------------------------
     # COLUMN NORMALIZATION
     # --------------------------------------------------------
@@ -3012,10 +3011,17 @@ def normalize_agent_plan(
     # FINAL VALIDATION
     # --------------------------------------------------------
 
-    return validate_plan(
+    validated_plan = validate_plan(
         result,
         build_profile(df),
     )
+
+    if not isinstance(validated_plan, dict):
+        raise ValueError(
+            "Normalized analysis plan is invalid."
+        )
+
+    return validated_plan
 
 # ============================================================
 # CHOOSE ANALYSIS
@@ -3091,7 +3097,6 @@ def choose_analysis(
     
 
 # ============================================================
-
 def execute_analysis(
     df: pd.DataFrame,
     plan: Dict[str, Any],
