@@ -1956,7 +1956,6 @@ def validate_plan(
 
     return result
 
-
 def normalize_plan(
     df: pd.DataFrame,
     plan: Dict[str, Any],
@@ -2860,7 +2859,7 @@ def normalize_agent_plan(
         and result.get("date")
     ):
         result["date_column"] = result["date"]
-
+        return result
     # --------------------------------------------------------
     # COLUMN NORMALIZATION
     # --------------------------------------------------------
