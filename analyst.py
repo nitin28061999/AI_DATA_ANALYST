@@ -157,16 +157,18 @@ def get_gemini_client():
     global client
     if client is not None:
         return client
+    if not GEMINI_API_KEY:
+        raise ValueError(
+            "GEMINI_API_KEY is missing from the environment or .env file."
+        )
+
     try:
         from google import genai
     except ImportError as exc:
         raise RuntimeError(
             "Gemini SDK is not installed. Install the package from requirements.txt."
         ) from exc
-    if not GEMINI_API_KEY:
-        raise ValueError(
-            "GEMINI_API_KEY is missing from the environment or .env file."
-        )
+
     client = genai.Client(api_key=GEMINI_API_KEY)
     return client
 
