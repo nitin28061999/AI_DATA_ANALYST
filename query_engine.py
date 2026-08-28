@@ -36,6 +36,7 @@ GROUP_OPS = {
     "filtered_group_average",
     "group_and_count",
     "group_count",
+    "filtered_group_and_count",
     "top_n",
     "filtered_top_n",
     "percentage_of_total",
@@ -117,6 +118,13 @@ def validate_query(plan: Dict[str, Any]) -> Dict[str, Any]:
         raise ValueError(
             f"Operation '{operation}' missing 'group_by'."
         )
+
+    if op == "filtered_group_and_count":
+        filters = plan.get("filters", [])
+        if not filters:
+            raise ValueError(
+                "Operation 'filtered_group_and_count' requires 'filters'."
+            )
 
     if op in GROUP_VALUE_OPS and not column:
         raise ValueError(
@@ -442,6 +450,13 @@ def execute_query(
                     df,
                     group_column,
                 )
+            )
+
+        case "filtered_group_and_count":
+            return _filtered_group_count(
+                df,
+                filters,
+                group_column,
             )
 
         case "value_counts" | "filtered_value_counts":
