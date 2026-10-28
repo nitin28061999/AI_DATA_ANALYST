@@ -38,5 +38,6 @@
         "streamlit",
         "venv",
         "webassets"
-    ]
+    ],
+    "python-envs.defaultEnvManager": "ms-python.python:system"
 }
