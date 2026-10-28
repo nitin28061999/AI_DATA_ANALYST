@@ -106,35 +106,23 @@ class GeminiPlan(BaseModel):
         description="Optional list of dataset filters.",
     )
 
+
 # ============================================================
 # GEMINI CONFIGURATION
 # ============================================================
-#
-# Gemini is REQUIRED for this analyst.
-#
-# The architecture is:
-#
-#     User question
-#           |
-#           v
-#     Gemini chooses the analysis plan
-#           |
-#           v
-#     Python validates the plan
-#           |
-#           v
-#     Python performs the calculation
-#           |
-#           v
-#     Gemini explains the actual result
-#
-# No ANALYST_USE_GEMINI switch is used.
-# A missing SDK or API key is treated as a configuration error.
-#
-# ============================================================
 
+from pathlib import Path
 from dotenv import load_dotenv
-load_dotenv()
+
+# Resolve .env relative to this file, not the terminal directory.
+BASE_DIR = Path(__file__).resolve().parent
+ENV_FILE = BASE_DIR / ".env"
+
+load_dotenv(
+    dotenv_path=ENV_FILE,
+    override=False,
+    encoding="utf-8-sig"
+)
 
 MODEL_NAME = os.getenv(
     "GEMINI_MODEL",
@@ -142,34 +130,36 @@ MODEL_NAME = os.getenv(
 ).strip()
 
 if not MODEL_NAME:
-    raise ValueError(
-        "GEMINI_MODEL cannot be empty."
-    )
-
-GEMINI_API_KEY = os.getenv(
-    "GEMINI_API_KEY"
-)
+    raise ValueError("GEMINI_MODEL cannot be empty.")
 
 client = None
 
+
 def get_gemini_client():
-    """Create the Gemini client only when an AI request is actually made."""
+    """Load the API key and initialize Gemini when needed."""
     global client
+
     if client is not None:
         return client
-    if not GEMINI_API_KEY:
+
+    # Read the environment variable at call time.
+    api_key = os.getenv("GEMINI_API_KEY")
+
+    if not api_key or not api_key.strip():
         raise ValueError(
-            "GEMINI_API_KEY is missing from the environment or .env file."
+            f"GEMINI_API_KEY is missing. Expected it in "
+            f"the environment or this file: {ENV_FILE}"
         )
 
     try:
         from google import genai
     except ImportError as exc:
         raise RuntimeError(
-            "Gemini SDK is not installed. Install the package from requirements.txt."
+            "Gemini SDK is not installed. "
+            "Install google-genai using requirements.txt."
         ) from exc
 
-    client = genai.Client(api_key=GEMINI_API_KEY)
+    client = genai.Client(api_key=api_key.strip())
     return client
 
 
